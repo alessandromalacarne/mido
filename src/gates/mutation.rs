@@ -1,7 +1,7 @@
 //! Gate 6 — do the tests actually detect broken code?
 
 use crate::config::Config;
-use crate::gates::{fix_hints, general, RUST_EXT};
+use crate::gates::{fix_hints, RUST_EXT};
 use crate::metrics::percent;
 use crate::process::last_lines;
 use crate::process::{self, Command, Runner};
@@ -103,10 +103,10 @@ pub fn gate_mutation(
     let minimum = config.float("mutation", "kill_rate_min", 70.0, Some(&target.name));
     let timeout = config.int("mutation", "timeout_secs", 3600, Some(&target.name));
     let scope = config.text_setting("mutation", "scope", "changed", Some(&target.name));
-    let command = config.command("mutation", "command", target, "cargo mutants");
+    let mut args = config
+        .argv("mutation", "command", target)
+        .unwrap_or_else(|| vec!["cargo".to_string(), "mutants".to_string()]);
     let patch = scratch.join(format!("guardrails-changed-{}.patch", target.name));
-
-    let mut args = process::split(&command);
     match scope_args(runner, repo, target, &scope, &patch) {
         Ok(scoped) => args.extend(scoped),
         Err(error) => {
@@ -123,15 +123,13 @@ pub fn gate_mutation(
     args.push("--timeout".to_string());
     args.push(DEFAULT_MUTANT_TIMEOUT.to_string());
     let contract = format!(
-        "{} [mutation] kill_rate_min={}, scope={scope} via `{}`",
+        "{} [mutation] kill_rate_min={minimum}, scope={scope} via `{}`",
         config.source(),
-        general(minimum),
         args.join(" ")
     );
 
     let result = process::dev(
         runner,
-        repo,
         &target.dir(repo),
         &args,
         Some(timeout.max(0) as u64),

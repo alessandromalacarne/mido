@@ -14,6 +14,8 @@ pub struct Command {
     pub cwd: PathBuf,
     pub timeout: Option<u64>,
     pub stdin: Option<String>,
+    pub stdout_file: Option<PathBuf>,
+    pub stderr_file: Option<PathBuf>,
 }
 
 impl Command {
@@ -23,6 +25,8 @@ impl Command {
             cwd: cwd.into(),
             timeout: None,
             stdin: None,
+            stdout_file: None,
+            stderr_file: None,
         }
     }
 
@@ -33,6 +37,17 @@ impl Command {
 
     pub fn stdin(mut self, input: impl Into<String>) -> Self {
         self.stdin = Some(input.into());
+        self
+    }
+
+    /// Send the process's stdout to a file instead of a pipe.
+    pub fn stdout_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.stdout_file = Some(path.into());
+        self
+    }
+
+    pub fn stderr_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.stderr_file = Some(path.into());
         self
     }
 }
@@ -80,8 +95,8 @@ impl Runner for SystemRunner {
             .args(rest)
             .current_dir(&command.cwd)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(stream_for(&command.stdout_file))
+            .stderr(stream_for(&command.stderr_file))
             .spawn()
         {
             Ok(child) => child,
@@ -123,6 +138,17 @@ impl Runner for SystemRunner {
             return false;
         };
         std::env::split_paths(&path).any(|directory| is_executable(&directory.join(tool)))
+    }
+}
+
+/// A file the caller asked for, or a pipe when the file cannot be created.
+fn stream_for(file: &Option<PathBuf>) -> Stdio {
+    match file {
+        Some(path) => match fs::File::create(path) {
+            Ok(handle) => Stdio::from(handle),
+            Err(_) => Stdio::piped(),
+        },
+        None => Stdio::piped(),
     }
 }
 
@@ -186,123 +212,27 @@ fn exit_status(status: std::process::ExitStatus) -> i32 {
     status.code().unwrap_or(-1)
 }
 
-/// `shlex.quote`, so a command can be re-assembled for `bash -c`.
-pub fn quote(value: &str) -> String {
-    let safe = !value.is_empty()
-        && value.chars().all(|character| {
-            character.is_ascii_alphanumeric()
-                || matches!(
-                    character,
-                    '_' | '@' | '%' | '+' | '=' | ':' | ',' | '.' | '/' | '-'
-                )
-        });
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    if safe {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-pub fn join_quoted(args: &[String]) -> String {
-    args.iter()
-        .map(|arg| quote(arg))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// `shlex.split` for the commands the config carries: quotes group, backslash escapes.
-pub fn split(command: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut started = false;
-    let mut characters = command.chars();
-
-    while let Some(character) = characters.next() {
-        if let Some(quote) = quote_of(character) {
-            started = true;
-            take_quoted(&mut characters, quote, &mut current);
-        } else if character == '\\' {
-            started = true;
-            if let Some(escaped) = characters.next() {
-                current.push(escaped);
-            }
-        } else if character.is_whitespace() {
-            if started {
-                args.push(std::mem::take(&mut current));
-                started = false;
-            }
-        } else {
-            started = true;
-            current.push(character);
-        }
-    }
-    if started {
-        args.push(current);
-    }
-    args
-}
-
-fn quote_of(character: char) -> Option<char> {
-    matches!(character, '\'' | '"').then_some(character)
-}
-
-fn take_quoted(characters: &mut impl Iterator<Item = char>, quote: char, current: &mut String) {
-    for inner in characters.by_ref() {
-        if inner == quote {
-            break;
-        }
-        current.push(inner);
-    }
-}
-
-/// The dev-shell command line, with the tool's own streams kept apart.
+/// Run a command with `workdir` as its directory, inside the dev shell when needed.
 ///
-/// `nix develop` prints its shellHook chatter on stdout before the tool runs,
-/// which would corrupt every json payload the gates parse. Redirecting the tool
-/// into files keeps stdout, stderr and stop correct.
-pub fn capture_command(
-    workdir: &Path,
-    args: &[String],
-    stdout_path: &Path,
-    stderr_path: &Path,
-) -> String {
-    format!(
-        "cd {} && {} > {} 2> {}",
-        quote(&workdir.to_string_lossy()),
-        join_quoted(args),
-        quote(&stdout_path.to_string_lossy()),
-        quote(&stderr_path.to_string_lossy()),
-    )
-}
-
-/// Run a command in the target directory, inside the dev shell when needed.
-///
-/// The shell must be non-login (`bash -c`, not `bash -lc`): a login shell
-/// re-sources the system profile and drops the PATH `nix develop` just set up.
-pub fn dev(
-    runner: &dyn Runner,
-    repo: &Path,
-    workdir: &Path,
-    args: &[String],
-    timeout: Option<u64>,
-) -> Outcome {
+/// `nix develop` prints its shellHook and flake notices on stderr before the
+/// tool runs, so its streams are captured in files rather than pipes — stdout
+/// stays the tool's own, which is what every json payload the gates parse needs.
+pub fn dev(runner: &dyn Runner, workdir: &Path, args: &[String], timeout: Option<u64>) -> Outcome {
     if runner.has("cargo") {
-        let inner = format!(
-            "cd {} && {}",
-            quote(&workdir.to_string_lossy()),
-            join_quoted(args)
-        );
-        return runner.exec(&Command::new(repo, ["bash", "-c", &inner]).timeout(timeout));
+        return runner.exec(&Command::new(workdir, args.to_vec()).timeout(timeout));
     }
 
     let directory = scratch_directory("guardrails-dev-");
     let out_path = directory.join("stdout");
     let err_path = directory.join("stderr");
-    let inner = capture_command(workdir, args, &out_path, &err_path);
-    let result = runner
-        .exec(&Command::new(repo, ["nix", "develop", "-c", "bash", "-c", &inner]).timeout(timeout));
+    let mut argv = vec!["nix".to_string(), "develop".to_string(), "-c".to_string()];
+    argv.extend(args.iter().cloned());
+    let result = runner.exec(
+        &Command::new(workdir, argv)
+            .timeout(timeout)
+            .stdout_file(out_path.clone())
+            .stderr_file(err_path.clone()),
+    );
 
     let stdout = fs::read_to_string(&out_path).unwrap_or(result.stdout);
     let stderr = fs::read_to_string(&err_path).unwrap_or(result.stderr);

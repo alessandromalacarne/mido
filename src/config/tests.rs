@@ -9,6 +9,10 @@ fn repo(config: &str) -> MiniRepo {
     MiniRepo::build(Some(config))
 }
 
+fn argv(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| item.to_string()).collect()
+}
+
 #[test]
 fn repo_config_is_valid() {
     let config = Config::load(Path::new(env!("CARGO_MANIFEST_DIR"))).expect("repo config loads");
@@ -38,15 +42,15 @@ fn lint_command_comes_from_the_config() {
             version = 1
 
             [syntax]
-            lint = \"cargo clippy -- -D warnings\"
+            lint = [\"cargo\", \"clippy\", \"--\", \"-D\", \"warnings\"]
         ",
     );
 
     let config = load(&repo).expect("config loads");
 
     assert_eq!(
-        config.text_setting("syntax", "lint", "fallback", None),
-        "cargo clippy -- -D warnings"
+        config.argv("syntax", "lint", &Target::workspace_target()),
+        Some(argv(&["cargo", "clippy", "--", "-D", "warnings"]))
     );
 }
 
@@ -78,7 +82,7 @@ fn misspelled_section_is_a_config_error() {
             version = 1
 
             [test]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
     );
 
@@ -127,7 +131,7 @@ fn missing_version_is_a_warning_not_an_error() {
     let repo = repo(
         "
             [tests]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
     );
 
@@ -189,21 +193,13 @@ fn standalone_crate_does_not_inherit_the_root_lint_command() {
             version = 1
 
             [syntax]
-            lint = \"cargo clippy --all-targets --all-features -- -D warnings\"
+            lint = [\"cargo\", \"clippy\", \"--all-targets\", \"--all-features\"]
         ",
     );
     let config = load(&repo).expect("config loads");
     let frontend = Target::crate_target("frontend", false);
 
-    assert_eq!(
-        config.command(
-            "syntax",
-            "lint",
-            &frontend,
-            "cargo clippy --all-targets -- -D warnings"
-        ),
-        "cargo clippy --all-targets -- -D warnings"
-    );
+    assert_eq!(config.argv("syntax", "lint", &frontend), None);
 }
 
 #[test]
@@ -213,20 +209,21 @@ fn workspace_member_inherits_the_root_lint_command() {
             version = 1
 
             [syntax]
-            lint = \"cargo clippy --all-targets --all-features -- -D warnings\"
+            lint = [\"cargo\", \"clippy\", \"--all-targets\", \"--all-features\"]
         ",
     );
     let config = load(&repo).expect("config loads");
     let lib = Target::crate_target("lib", true);
 
-    assert!(config
-        .command(
-            "syntax",
-            "lint",
-            &lib,
-            "cargo clippy --all-targets -- -D warnings"
-        )
-        .contains("--all-features"));
+    assert_eq!(
+        config.argv("syntax", "lint", &lib),
+        Some(argv(&[
+            "cargo",
+            "clippy",
+            "--all-targets",
+            "--all-features"
+        ]))
+    );
 }
 
 #[test]
@@ -236,18 +233,23 @@ fn target_section_wins_over_the_root_command() {
             version = 1
 
             [syntax]
-            lint = \"cargo clippy --all-features\"
+            lint = [\"cargo\", \"clippy\", \"--all-features\"]
 
             [targets.frontend.syntax]
-            lint = \"cargo clippy --target wasm32-unknown-unknown\"
+            lint = [\"cargo\", \"clippy\", \"--target\", \"wasm32-unknown-unknown\"]
         ",
     );
     let config = load(&repo).expect("config loads");
     let frontend = Target::crate_target("frontend", false);
 
     assert_eq!(
-        config.command("syntax", "lint", &frontend, "fallback"),
-        "cargo clippy --target wasm32-unknown-unknown"
+        config.argv("syntax", "lint", &frontend),
+        Some(argv(&[
+            "cargo",
+            "clippy",
+            "--target",
+            "wasm32-unknown-unknown"
+        ]))
     );
 }
 
@@ -387,23 +389,20 @@ fn a_target_section_is_merged_into_the_root_section() {
 }
 
 #[test]
-fn commands_accept_a_list() {
+fn commands_are_read_as_argv() {
     let repo = repo(
         "
             version = 1
 
             [tests]
-            command = [\"cargo test\", \"cargo test --all-features\"]
+            command = [\"cargo\", \"test\", \"--all-features\"]
         ",
     );
     let config = load(&repo).expect("config loads");
     let target = Target::workspace_target();
 
     assert_eq!(
-        config.commands("tests", "command", &target, vec![]),
-        vec![
-            "cargo test".to_string(),
-            "cargo test --all-features".to_string()
-        ]
+        config.argv("tests", "command", &target),
+        Some(argv(&["cargo", "test", "--all-features"]))
     );
 }

@@ -29,16 +29,20 @@ fn failure_pattern() -> &'static Regex {
 /// command` for the workspace and its members. A standalone crate derives its
 /// own — including the wasm32 run when it browser-tests through
 /// `wasm-bindgen-test`.
-pub fn test_commands(config: &Config, target: &Target, repo: &Path) -> Vec<String> {
-    let configured = config.commands("tests", "command", target, Vec::new());
-    if !configured.is_empty() {
-        return configured;
+pub fn test_commands(config: &Config, target: &Target, repo: &Path) -> Vec<Vec<String>> {
+    if let Some(configured) = config.argv("tests", "command", target) {
+        return vec![configured];
     }
 
-    let mut commands = vec!["cargo test".to_string()];
+    let mut commands = vec![vec!["cargo".to_string(), "test".to_string()]];
     if !target.workspace_member && target.manifest.is_some() && uses_wasm_bindgen_test(repo, target)
     {
-        commands.push("cargo test --target wasm32-unknown-unknown".to_string());
+        commands.push(
+            ["cargo", "test", "--target", "wasm32-unknown-unknown"]
+                .iter()
+                .map(|arg| (*arg).to_string())
+                .collect(),
+        );
     }
     commands
 }
@@ -70,14 +74,22 @@ pub fn gate_tests(
         .int("tests", "timeout_secs", 900, Some(&target.name))
         .max(0) as u64;
     let commands = test_commands(config, target, repo);
-    let contract = format!("{} [tests] {}", config.source(), commands.join(" && "));
+    let contract = format!(
+        "{} [tests] {}",
+        config.source(),
+        commands
+            .iter()
+            .map(|argv| argv.join(" "))
+            .collect::<Vec<_>>()
+            .join(" && ")
+    );
 
     let mut details: Vec<String> = Vec::new();
     let mut problems: Vec<String> = Vec::new();
     let mut status = PASS;
 
-    for command in &commands {
-        let verdict = run_command(runner, repo, target, command, timeout);
+    for argv in &commands {
+        let verdict = run_command(runner, repo, target, argv, timeout);
         details.extend(verdict.details);
         problems.extend(verdict.problems);
         if verdict.failed {
@@ -107,16 +119,11 @@ fn run_command(
     runner: &dyn Runner,
     repo: &Path,
     target: &Target,
-    command: &str,
+    argv: &[String],
     timeout: u64,
 ) -> CommandVerdict {
-    let result = process::dev(
-        runner,
-        repo,
-        &target.dir(repo),
-        &process::split(command),
-        Some(timeout),
-    );
+    let command = argv.join(" ");
+    let result = process::dev(runner, &target.dir(repo), argv, Some(timeout));
     let output = result.combined();
     let reported = summaries(&output);
 
@@ -207,6 +214,10 @@ mod tests {
         Config::load(&repo.root).expect("config loads")
     }
 
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
     #[test]
     fn the_workspace_inherits_the_root_test_command() {
         let repo = repo(Some(
@@ -214,13 +225,13 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test --all-features\"
+            command = [\"cargo\", \"test\", \"--all-features\"]
         ",
         ));
 
         assert_eq!(
             test_commands(&config_for(&repo), &Target::workspace_target(), &repo.root),
-            vec!["cargo test --all-features"]
+            vec![argv(&["cargo", "test", "--all-features"])]
         );
     }
 
@@ -231,10 +242,10 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test --all-features\"
+            command = [\"cargo\", \"test\", \"--all-features\"]
 
             [targets.frontend.tests]
-            command = \"cargo test --target wasm32-unknown-unknown\"
+            command = [\"cargo\", \"test\", \"--target\", \"wasm32-unknown-unknown\"]
         ",
         ));
         let config = config_for(&repo);
@@ -242,7 +253,12 @@ mod tests {
 
         assert_eq!(
             test_commands(&config, &frontend, &repo.root),
-            vec!["cargo test --target wasm32-unknown-unknown"]
+            vec![argv(&[
+                "cargo",
+                "test",
+                "--target",
+                "wasm32-unknown-unknown"
+            ])]
         );
     }
 
@@ -253,14 +269,14 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test --all-features\"
+            command = [\"cargo\", \"test\", \"--all-features\"]
         ",
         ));
         let config = config_for(&repo);
 
         assert_eq!(
             test_commands(&config, &Target::crate_target("desktop", false), &repo.root),
-            vec!["cargo test"]
+            vec![argv(&["cargo", "test"])]
         );
     }
 
@@ -282,7 +298,10 @@ mod tests {
                 &Target::crate_target("frontend", false),
                 &repo.root
             ),
-            vec!["cargo test", "cargo test --target wasm32-unknown-unknown"]
+            vec![
+                argv(&["cargo", "test"]),
+                argv(&["cargo", "test", "--target", "wasm32-unknown-unknown"])
+            ]
         );
     }
 
@@ -296,7 +315,7 @@ mod tests {
                 &Target::crate_target("desktop", false),
                 &repo.root
             ),
-            vec!["cargo test"]
+            vec![argv(&["cargo", "test"])]
         );
     }
 
@@ -317,7 +336,7 @@ mod tests {
                 &Target::crate_target("frontend", false),
                 &repo.root
             ),
-            vec!["cargo test"]
+            vec![argv(&["cargo", "test"])]
         );
     }
 
@@ -328,7 +347,7 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test --all-features\"
+            command = [\"cargo\", \"test\", \"--all-features\"]
         ",
         ));
         let output = "test thing::works ... ok\ntest thing::breaks ... FAILED\n\ntest result: FAILED. 1 passed; 1 failed\n";
@@ -353,7 +372,7 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
         ));
         let output = "test result: ok. 41 passed; 0 failed; 0 ignored\n";
@@ -377,7 +396,7 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
         ));
         let runner = FakeRunner::with(&[("cargo test", 127, "cargo: command not found")]);
@@ -400,7 +419,7 @@ mod tests {
             version = 1
 
             [tests]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
         ));
         let runner =

@@ -40,8 +40,7 @@ impl FakeRunner {
     }
 }
 
-/// The needle is matched against the whole call, including the script handed to
-/// `bash -c` — that is where the interesting command actually lives.
+/// The needle is matched against the whole argv, joined with spaces.
 fn command_line(command: &Command) -> String {
     format!(
         "{} {}",

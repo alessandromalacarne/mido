@@ -1,41 +1,48 @@
 //! Gate 5 — coverage of the changed code.
 
 use crate::config::Config;
-use crate::gates::{fix_hints, general};
+use crate::gates::fix_hints;
 use crate::metrics::{lcov_files, percent, relative_to, touches, LcovStat};
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
 use crate::targets::Target;
-use regex::Regex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
-fn output_path_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r"--output-path[= ](\S+)").expect("valid pattern"))
-}
-
-/// The command to run, with `{lcov}` filled in, and the report it should write.
+/// The argv to run, with `{lcov}` filled in, and the report it should write.
 pub fn coverage_report_path(
-    command: &str,
+    argv: &[String],
     repo: &Path,
     target: &Target,
     scratch: &Path,
-) -> (String, PathBuf) {
+) -> (Vec<String>, PathBuf) {
     let report = scratch.join(format!("guardrails-lcov-{}.info", target.name));
-    let command = command.replace("{lcov}", &report.to_string_lossy());
+    let argv: Vec<String> = argv
+        .iter()
+        .map(|arg| arg.replace("{lcov}", &report.to_string_lossy()))
+        .collect();
 
-    let path = match output_path_pattern().captures(&command) {
-        Some(captures) => PathBuf::from(&captures[1]),
-        None => PathBuf::from("lcov.info"),
-    };
+    let path = output_path(&argv).unwrap_or_else(|| PathBuf::from("lcov.info"));
     let path = if path.is_absolute() {
         path
     } else {
         target.dir(repo).join(path)
     };
-    (command, path)
+    (argv, path)
+}
+
+/// Where the command says it writes: `--output-path <path>` or `--output-path=<path>`.
+fn output_path(argv: &[String]) -> Option<PathBuf> {
+    let mut args = argv.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--output-path" {
+            return args.next().map(PathBuf::from);
+        }
+        if let Some(value) = arg.strip_prefix("--output-path=") {
+            return Some(PathBuf::from(value));
+        }
+    }
+    None
 }
 
 pub fn judge_changed_coverage(
@@ -62,10 +69,8 @@ pub fn judge_changed_coverage(
         ));
         if value < minimum {
             problems.push(format!(
-                "changed file {shown}: {}/{} = {value:.1}% (min {})",
-                stats.lines_hit,
-                stats.lines_found,
-                general(minimum)
+                "changed file {shown}: {}/{} = {value:.1}% (min {minimum})",
+                stats.lines_hit, stats.lines_found
             ));
         }
     }
@@ -103,8 +108,7 @@ pub fn judge_coverage_delta(
     if delta < -drop_max.abs() {
         return (
             vec![format!(
-                "total coverage dropped {delta:+.1} points (max {})",
-                general(drop_max)
+                "total coverage dropped {delta:+.1} points (max {drop_max})"
             )],
             details,
         );
@@ -123,30 +127,22 @@ pub fn gate_coverage(
 ) -> GateResult {
     let minimum = config.float("coverage", "changed_file_min", 80.0, Some(&target.name));
     let drop_max = config.float("coverage", "total_drop_max", 0.0, Some(&target.name));
-    let (command, report_path) = coverage_report_path(
-        &config.command(
-            "coverage",
-            "command",
-            target,
-            "cargo llvm-cov --lcov --output-path {lcov}",
-        ),
-        repo,
-        target,
-        scratch,
-    );
+    let argv = config
+        .argv("coverage", "command", target)
+        .unwrap_or_else(|| {
+            ["cargo", "llvm-cov", "--lcov", "--output-path", "{lcov}"]
+                .iter()
+                .map(|arg| (*arg).to_string())
+                .collect()
+        });
+    let (argv, report_path) = coverage_report_path(&argv, repo, target, scratch);
+    let command = argv.join(" ");
     let contract = format!(
-        "{} [coverage] changed_file_min={} via `{command}`",
-        config.source(),
-        general(minimum)
+        "{} [coverage] changed_file_min={minimum} via `{command}`",
+        config.source()
     );
 
-    let result = process::dev(
-        runner,
-        repo,
-        &target.dir(repo),
-        &process::split(&command),
-        None,
-    );
+    let result = process::dev(runner, &target.dir(repo), &argv, None);
     if !result.ok() || !report_path.exists() {
         return missing_report(&result, &command, &report_path, &contract);
     }
@@ -244,6 +240,10 @@ mod tests {
         Config::load(&repo.root).expect("config loads")
     }
 
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
     fn write_report(path: &Path, body: &str) {
         std::fs::write(path, body).expect("report");
     }
@@ -254,13 +254,13 @@ mod tests {
         let scratch = repo.root.join("scratch");
 
         let (command, path) = coverage_report_path(
-            "cargo llvm-cov --lcov --output-path {lcov}",
+            &argv(&["cargo", "llvm-cov", "--lcov", "--output-path", "{lcov}"]),
             &repo.root,
             &Target::workspace_target(),
             &scratch,
         );
 
-        assert!(command.contains("guardrails-lcov-workspace.info"));
+        assert!(command.join(" ").contains("guardrails-lcov-workspace.info"));
         assert_eq!(path, scratch.join("guardrails-lcov-workspace.info"));
     }
 
@@ -269,7 +269,7 @@ mod tests {
         let repo = repo();
 
         let (_, path) = coverage_report_path(
-            "cargo llvm-cov --lcov --output-path lcov.info",
+            &argv(&["cargo", "llvm-cov", "--lcov", "--output-path", "lcov.info"]),
             &repo.root,
             &Target::crate_target("frontend", false),
             &repo.root,
@@ -279,11 +279,25 @@ mod tests {
     }
 
     #[test]
+    fn the_equals_form_of_the_output_flag_is_read_too() {
+        let repo = repo();
+
+        let (_, path) = coverage_report_path(
+            &argv(&["cargo", "llvm-cov", "--output-path=lcov.info"]),
+            &repo.root,
+            &Target::workspace_target(),
+            &repo.root,
+        );
+
+        assert_eq!(path, repo.root.join("lcov.info"));
+    }
+
+    #[test]
     fn a_command_without_an_output_flag_defaults_to_lcov_info() {
         let repo = repo();
 
         let (_, path) = coverage_report_path(
-            "cargo llvm-cov",
+            &argv(&["cargo", "llvm-cov"]),
             &repo.root,
             &Target::workspace_target(),
             &repo.root,

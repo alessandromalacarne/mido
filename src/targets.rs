@@ -79,7 +79,7 @@ pub fn workspace_layout(repo: &Path) -> (Vec<String>, Vec<String>) {
     let listed = |key: &str| -> Vec<String> {
         workspace
             .and_then(|table| table.get(key))
-            .and_then(value::string_list)
+            .and_then(value::string_array)
             .unwrap_or_default()
     };
     (listed("members"), listed("exclude"))
@@ -123,7 +123,8 @@ pub fn declared_targets(config: &Config, members: &[String]) -> BTreeMap<String,
 fn declared_target(name: &str, section: &toml::Table, members: &[String]) -> Target {
     let path = section
         .get("path")
-        .map(value::render)
+        .and_then(value::as_str)
+        .map(str::to_string)
         .unwrap_or_else(|| name.to_string());
     let path = path.trim_matches('/').to_string();
 
@@ -139,7 +140,7 @@ fn declared_target(name: &str, section: &toml::Table, members: &[String]) -> Tar
 fn declared_scope(section: &toml::Table, path: &str) -> Vec<String> {
     match section
         .get("scope")
-        .and_then(value::string_list)
+        .and_then(value::string_array)
         .filter(|entries| !entries.is_empty())
     {
         Some(entries) => entries.into_iter().map(with_trailing_slash).collect(),

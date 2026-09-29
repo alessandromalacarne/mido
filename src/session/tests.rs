@@ -191,7 +191,7 @@ fn a_passing_run_writes_the_report_and_says_so() {
             version = 1
 
             [tests]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
     ));
     let report = repo.root.join("report.md");
@@ -226,7 +226,7 @@ fn a_failing_gate_exits_1_with_the_failure_report_on_stdout() {
             version = 1
 
             [tests]
-            command = \"cargo test\"
+            command = [\"cargo\", \"test\"]
         ",
     ));
     let runner = changed_runner((101, "test result: FAILED. 0 passed; 2 failed\n"));

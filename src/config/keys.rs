@@ -14,22 +14,13 @@ pub fn gate_keys(gate: &str) -> &'static [&'static str] {
         "syntax" => &["enabled", "command", "format", "lint", "typecheck"],
         "size" => &[
             "enabled",
-            "command",
             "tool",
             "file_loc",
             "function_loc",
             "complexity",
             "nesting",
         ],
-        "analysis" => &[
-            "enabled",
-            "command",
-            "tool",
-            "mi_min",
-            "cognitive_max",
-            "halstead_effort_max",
-            "duplication_command",
-        ],
+        "analysis" => &["enabled", "tool", "mi_min", "cognitive_max"],
         "tests" => &["enabled", "command", "timeout_secs"],
         "coverage" => &["enabled", "command", "changed_file_min", "total_drop_max"],
         "mutation" => &[
@@ -39,6 +30,17 @@ pub fn gate_keys(gate: &str) -> &'static [&'static str] {
             "timeout_secs",
             "kill_rate_min",
         ],
+        _ => &[],
+    }
+}
+
+/// The keys whose value is a command: an argv array of strings.
+pub fn command_keys(gate: &str) -> &'static [&'static str] {
+    match gate {
+        "syntax" => &["command", "format", "lint", "typecheck"],
+        "tests" => &["command"],
+        "coverage" => &["command"],
+        "mutation" => &["command"],
         _ => &[],
     }
 }
@@ -77,6 +79,15 @@ mod tests {
         for gate in GATES {
             assert!(!gate_keys(gate).is_empty(), "{gate} has keys");
             assert!(gate_keys(gate).contains(&"enabled"));
+        }
+    }
+
+    #[test]
+    fn command_keys_are_gate_keys() {
+        for gate in GATES {
+            for key in command_keys(gate) {
+                assert!(gate_keys(gate).contains(key), "{gate} accepts {key}");
+            }
         }
     }
 

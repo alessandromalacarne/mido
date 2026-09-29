@@ -61,7 +61,7 @@ pub fn tokei_code_lines(
         .map(|arg| arg.to_string())
         .chain(files.iter().cloned())
         .collect();
-    let result = process::dev(runner, repo, &target.dir(repo), &args, None);
+    let result = process::dev(runner, &target.dir(repo), &args, None);
     if !result.ok() || result.stdout.trim().is_empty() {
         on_error.push(format!(
             "tokei could not measure {} file(s) (exit {})",
@@ -224,7 +224,7 @@ pub fn gate_size(
         repo,
         target,
         &rust_files,
-        &config.command("size", "tool", target, "tokei"),
+        &config.text_setting("size", "tool", "tokei", Some(&target.name)),
         &mut measurement_errors,
     );
     let (file_problems, mut details) = judge_file_sizes(&lines, &limits);

@@ -1,7 +1,7 @@
 //! Gate 3 — maintainability metrics.
 
 use crate::config::Config;
-use crate::gates::{fix_hints, general};
+use crate::gates::fix_hints;
 use crate::metrics::{units_from_document, Unit};
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
@@ -9,13 +9,7 @@ use crate::targets::Target;
 use std::path::Path;
 
 pub fn analysis_tool(config: &Config, target: &Target) -> String {
-    config
-        .command("analysis", "tool", target, "rust-code-analysis")
-        .split('|')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+    config.text_setting("analysis", "tool", "rust-code-analysis", Some(&target.name))
 }
 
 pub fn analysis_units(
@@ -40,7 +34,7 @@ pub fn analysis_units(
         .iter()
         .map(|arg| arg.to_string())
         .collect();
-        let result = process::dev(runner, repo, &target.dir(repo), &args, None);
+        let result = process::dev(runner, &target.dir(repo), &args, None);
         if !result.ok() || result.stdout.trim().is_empty() {
             on_error.push(format!(
                 "{path}: rust-code-analysis could not read it (exit {})",
@@ -71,8 +65,8 @@ pub fn gate_analysis(
     let contract = format!(
         "{} [analysis] mi_min={}, cognitive_max={} (tool {tool})",
         config.source(),
-        general(mi_min),
-        general(cognitive_max)
+        mi_min,
+        cognitive_max
     );
 
     if let Some(result) = unsupported_tool(config, target, &tool, &contract) {
@@ -149,20 +143,14 @@ fn worst_units(units: &[Unit]) -> Option<(&Unit, &Unit)> {
 fn worst_mi_line(unit: &Unit, mi_min: f64) -> String {
     format!(
         "worst MI: {:.1} (min {}) — {} @ {}",
-        unit.mi,
-        general(mi_min),
-        unit.name,
-        unit.path
+        unit.mi, mi_min, unit.name, unit.path
     )
 }
 
 fn worst_cognitive_line(unit: &Unit, cognitive_max: f64) -> String {
     format!(
         "worst cognitive: {} (max {}) — {} @ {}",
-        unit.cognitive,
-        general(cognitive_max),
-        unit.name,
-        unit.path
+        unit.cognitive, cognitive_max, unit.name, unit.path
     )
 }
 
@@ -172,19 +160,13 @@ fn judge_units(units: &[Unit], mi_min: f64, cognitive_max: f64) -> Vec<String> {
         if unit.mi < mi_min {
             problems.push(format!(
                 "{}: {} MI {:.1} (min {})",
-                unit.path,
-                unit.name,
-                unit.mi,
-                general(mi_min)
+                unit.path, unit.name, unit.mi, mi_min
             ));
         }
         if unit.cognitive as f64 > cognitive_max {
             problems.push(format!(
                 "{}: {} cognitive complexity {} (max {})",
-                unit.path,
-                unit.name,
-                unit.cognitive,
-                general(cognitive_max)
+                unit.path, unit.name, unit.cognitive, cognitive_max
             ));
         }
     }
@@ -347,29 +329,5 @@ mod tests {
         assert_eq!(result.status, INCOMPLETE);
         assert!(result.summary.contains("`lizard` is not supported"));
         assert!(result.fixes[0].contains("point [analysis] tool at rust-code-analysis"));
-    }
-
-    #[test]
-    fn a_piped_tool_setting_keeps_only_the_first_name() {
-        let repo = repo(Some(
-            "
-            version = 1
-
-            [analysis]
-            tool = \"rust-code-analysis | something-else\"
-        ",
-        ));
-
-        assert_eq!(
-            analysis_tool(&config_for(&repo), &Target::workspace_target()),
-            "rust-code-analysis"
-        );
-    }
-
-    #[test]
-    fn thresholds_print_without_a_trailing_zero() {
-        assert_eq!(general(20.0), "20");
-        assert_eq!(general(0.0), "0");
-        assert_eq!(general(12.5), "12.5");
     }
 }

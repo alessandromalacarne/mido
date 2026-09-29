@@ -1,7 +1,6 @@
 //! `.guardrails.toml` is the tool contract.
 
 pub mod keys;
-pub mod suggest;
 pub mod text;
 pub mod validate;
 pub mod value;
@@ -206,66 +205,33 @@ impl Config {
         )
     }
 
-    /// The command this gate runs for this target, and where it came from.
+    /// The argv this gate runs for this target, when the config declares one.
     ///
     /// `[targets.<name>.<gate>]` wins. A root section is written for the
     /// repo-level gate, so the workspace and its members inherit it — a
     /// standalone crate (something the root manifest excludes) does not:
     /// `--all-features` written for the workspace root pulls the backend
     /// features into a wasm crate and breaks the build.
-    pub fn command(&self, gate: &str, key: &str, target: &Target, default: &str) -> String {
-        if let Some(value) = self
+    pub fn argv(&self, gate: &str, key: &str, target: &Target) -> Option<Vec<String>> {
+        let overridden = self
             .target_table(&target.name)
             .and_then(|table| table.get(gate))
             .and_then(value::as_table)
-            .and_then(|section| section.get(key))
-        {
-            return value::render(value);
+            .and_then(|section| section.get(key));
+        if let Some(value) = overridden {
+            return value::string_array(value);
         }
         if target.workspace_member {
-            if let Some(value) = self
+            let inherited = self
                 .data
                 .get(gate)
                 .and_then(value::as_table)
-                .and_then(|section| section.get(key))
-            {
-                return value::render(value);
+                .and_then(|section| section.get(key));
+            if let Some(value) = inherited {
+                return value::string_array(value);
             }
         }
-        default.to_string()
-    }
-
-    /// The commands a gate runs, written either as one string or as a list.
-    pub fn commands(
-        &self,
-        gate: &str,
-        key: &str,
-        target: &Target,
-        default: Vec<String>,
-    ) -> Vec<String> {
-        if let Some(value) = self
-            .target_table(&target.name)
-            .and_then(|table| table.get(gate))
-            .and_then(value::as_table)
-            .and_then(|section| section.get(key))
-        {
-            if let Some(commands) = value::command_list(value) {
-                return commands;
-            }
-        }
-        if target.workspace_member {
-            if let Some(value) = self
-                .data
-                .get(gate)
-                .and_then(value::as_table)
-                .and_then(|section| section.get(key))
-            {
-                if let Some(commands) = value::command_list(value) {
-                    return commands;
-                }
-            }
-        }
-        default
+        None
     }
 }
 

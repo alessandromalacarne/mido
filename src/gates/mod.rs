@@ -41,15 +41,6 @@ pub fn fix_hints(gate: &str) -> &'static [&'static str] {
     }
 }
 
-/// Render a threshold the way Python's `:g` did: `20`, not `20.0`.
-pub fn general(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e15 {
-        format!("{}", value as i64)
-    } else {
-        format!("{value}")
-    }
-}
-
 /// Everything one target's run of the selected gates needs.
 pub struct GateRun<'a> {
     pub repo: &'a Path,
@@ -180,21 +171,6 @@ mod tests {
         assert!(fix_hints("size")[0].contains("real seam"));
         assert!(fix_hints("syntax")[0].contains("fix the diagnostics"));
         assert!(fix_hints("unknown-gate").is_empty());
-    }
-
-    #[test]
-    fn thresholds_render_without_a_trailing_zero() {
-        assert_eq!(general(20.0), "20");
-        assert_eq!(general(12.5), "12.5");
-        assert_eq!(general(-3.0), "-3");
-        assert_eq!(general(0.0), "0");
-    }
-
-    #[test]
-    fn an_enormous_threshold_stays_a_plain_float() {
-        // Past 1e15 the integer cast would lose the value, so the float stands.
-        assert_eq!(general(1e16), "10000000000000000");
-        assert!(general(1e16).contains("10000000000000000"));
     }
 
     #[test]

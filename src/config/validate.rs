@@ -1,7 +1,6 @@
 use super::keys::{self, GATES};
-use super::suggest::suggestion;
 use super::text::{is_section, located};
-use super::value::type_name;
+use super::value;
 use crate::error::GuardrailsError;
 use std::path::Path;
 use toml::{Table, Value};
@@ -35,9 +34,8 @@ pub fn reject_unknown_top_level_key(key: &str, text: &str, config_path: &Path) -
     GuardrailsError::config(format!("{} is not valid", config_path.display()))
         .detail(format!("{}unknown {kind}", located(text, key, None)))
         .detail(format!(
-            "top level accepts: {} — {}",
-            keys::joined(known.iter().copied()),
-            suggestion(key, &known)
+            "top level accepts: {}",
+            keys::joined(known.iter().copied())
         ))
         .hint("the ladder refuses to run against a config it cannot read as written, because a typo would move a threshold")
 }
@@ -57,9 +55,8 @@ pub fn unknown_key_error(
             located(text, key, Some(section))
         ))
         .detail(format!(
-            "{where_} accepts: {} — {}",
-            keys::joined(known.iter().copied()),
-            suggestion(key, known)
+            "{where_} accepts: {}",
+            keys::joined(known.iter().copied())
         ))
         .hint("an unknown key is a config error on purpose, so a typo cannot silently disable a gate or move a threshold")
 }
@@ -145,7 +142,39 @@ pub fn validate_gate_section(
                 &known,
             ));
         }
+        if keys::command_keys(gate).contains(&key.as_str()) {
+            validate_command(config_path, &format!("`{label}`"), key, value)?;
+        }
         validate_threshold_table(config_path, section_name, key, value)?;
+    }
+    Ok(())
+}
+
+/// A command is the argv it runs as: an array of strings, never a shell line.
+fn validate_command(
+    config_path: &Path,
+    label: &str,
+    key: &str,
+    value: &Value,
+) -> Result<(), GuardrailsError> {
+    let Some(argv) = value::string_array(value) else {
+        return Err(
+            GuardrailsError::config(format!("{} is not valid", config_path.display()))
+                .detail(format!(
+                    "{label} `{key}` must be an array of strings, got {}",
+                    value.type_str()
+                ))
+                .hint(r#"commands are argv arrays: write it as ["cargo", "test"]"#),
+        );
+    };
+    if argv.is_empty() {
+        return Err(
+            GuardrailsError::config(format!("{} is not valid", config_path.display()))
+                .detail(format!(
+                    "{label} `{key}` is empty — it must list at least the program to run"
+                ))
+                .hint(r#"write it as ["cargo", "test"]"#),
+        );
     }
     Ok(())
 }
@@ -197,7 +226,7 @@ pub fn validate_script_entry(
             GuardrailsError::config(format!("{} is not valid", config_path.display()))
                 .detail(format!(
                     "{at}`script` must be a repo-relative path, got {}",
-                    type_name(value)
+                    value.type_str()
                 ))
                 .hint(r#"write it as script = "scripts/guardrails.py""#),
         );
@@ -212,4 +241,100 @@ pub fn validate_script_entry(
             .hint("a declared runner that is not there is worse than no declaration — fix the path or drop the key"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::MiniRepo;
+
+    fn load(repo: &MiniRepo) -> Result<crate::config::Config, GuardrailsError> {
+        crate::config::Config::load(&repo.root)
+    }
+
+    fn repo(config: &str) -> MiniRepo {
+        MiniRepo::build(Some(config))
+    }
+
+    #[test]
+    fn a_command_written_as_a_string_is_rejected_with_the_new_shape() {
+        let repo = repo(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test\"
+        ",
+        );
+
+        let message = load(&repo).expect_err("config is rejected").render();
+
+        assert!(message.contains("`[tests]` `command` must be an array of strings"));
+        assert!(message.contains("got string"));
+        assert!(message.contains(r#"["cargo", "test"]"#));
+    }
+
+    #[test]
+    fn an_empty_command_is_rejected() {
+        let repo = repo(
+            "
+            version = 1
+
+            [coverage]
+            command = []
+        ",
+        );
+
+        let message = load(&repo).expect_err("config is rejected").render();
+
+        assert!(message.contains("`[coverage]` `command` is empty"));
+    }
+
+    #[test]
+    fn a_command_with_a_non_string_element_is_rejected() {
+        let repo = repo(
+            "
+            version = 1
+
+            [mutation]
+            command = [\"cargo\", 3]
+        ",
+        );
+
+        let message = load(&repo).expect_err("config is rejected").render();
+
+        assert!(message.contains("must be an array of strings"));
+    }
+
+    #[test]
+    fn syntax_command_keys_are_checked_too() {
+        let repo = repo(
+            "
+            version = 1
+
+            [syntax]
+            lint = \"cargo clippy\"
+        ",
+        );
+
+        let message = load(&repo).expect_err("config is rejected").render();
+
+        assert!(message.contains("`[syntax]` `lint`"));
+    }
+
+    #[test]
+    fn a_target_section_command_is_checked_under_its_own_label() {
+        let repo = repo(
+            "
+            version = 1
+
+            [targets.frontend.tests]
+            command = \"cargo test --target wasm32\"
+        ",
+        );
+
+        let message = load(&repo).expect_err("config is rejected").render();
+
+        assert!(message.contains("`[targets.frontend.tests]` `command`"));
+    }
 }

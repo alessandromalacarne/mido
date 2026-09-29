@@ -10,7 +10,6 @@ use std::path::Path;
 pub fn probe_workspace(runner: &dyn Runner, repo: &Path, target: &Target) -> Outcome {
     process::dev(
         runner,
-        repo,
         &target.dir(repo),
         &[
             "cargo".to_string(),

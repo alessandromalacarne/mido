@@ -3,9 +3,9 @@ version = 1
 script = "src/main.rs"
 
 [syntax]
-format    = "cargo fmt --check"
-lint      = "cargo clippy --all-targets --all-features -- -D warnings"
-typecheck = "cargo check"
+format    = ["cargo", "fmt", "--check"]
+lint      = ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+typecheck = ["cargo", "check"]
 
 [size]
 tool           = "tokei"       # tokei | scc | radon | gocyclo | eslint
@@ -16,21 +16,20 @@ nesting      = { warn = 3,   fail = 4   }  # deepest block nesting
 
 [analysis]
 tool    = "rust-code-analysis"  # rust-code-analysis | lizard | radon | gocyclo
-command = "rust-code-analysis-cli -m -O json -o .guardrails-analysis -p {paths}"
 mi_min              = 20        # maintainability index floor (0–100, higher better)
 cognitive_max       = 15        # cognitive complexity, per function
 
 [tests]
-command      = "cargo test --all-features"
+command      = ["cargo", "test", "--all-features"]
 timeout_secs = 900
 
 [coverage]
-command          = "cargo llvm-cov --all-features --lcov --output-path lcov.info"
+command          = ["cargo", "llvm-cov", "--all-features", "--lcov", "--output-path", "lcov.info"]
 changed_file_min = 80   # percent line coverage for changed files with new logic
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
-command       = "cargo mutants"
+command       = ["cargo", "mutants"]
 scope         = "changed"      # "changed" | path | glob
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed

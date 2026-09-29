@@ -2,54 +2,11 @@ use super::*;
 use crate::test_support::FakeRunner;
 
 #[test]
-fn tool_streams_are_kept_apart_from_the_shell_chatter() {
-    let command = capture_command(
-        Path::new("/tmp/work tree"),
-        &[
-            "tokei".to_string(),
-            "--output".to_string(),
-            "json".to_string(),
-            "src/main.rs".to_string(),
-        ],
-        Path::new("/tmp/out"),
-        Path::new("/tmp/err"),
-    );
-
-    assert!(command.contains("cd '/tmp/work tree' &&"));
-    assert!(command.contains("tokei --output json src/main.rs"));
-    assert!(command.ends_with("> /tmp/out 2> /tmp/err"));
-    assert!(!command.contains("2>&1"));
-}
-
-#[test]
-fn quoting_matches_shell_rules() {
-    assert_eq!(quote("plain-arg_1.rs"), "plain-arg_1.rs");
-    assert_eq!(quote(""), "''");
-    assert_eq!(quote("two words"), "'two words'");
-    assert_eq!(quote("it's"), "'it'\"'\"'s'");
-}
-
-#[test]
-fn commands_split_the_way_the_shell_would() {
-    assert_eq!(
-        split("cargo clippy --all-targets -- -D warnings"),
-        vec!["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
-    );
-    assert_eq!(
-        split("cargo test --target 'wasm32 unknown'"),
-        vec!["cargo", "test", "--target", "wasm32 unknown"]
-    );
-    assert_eq!(split("  "), Vec::<String>::new());
-    assert_eq!(split("a\\ b"), vec!["a b"]);
-}
-
-#[test]
-fn dev_runs_through_bash_when_cargo_is_on_path() {
+fn dev_runs_the_argv_directly_when_cargo_is_on_path() {
     let runner = FakeRunner::default().tool("cargo");
 
     let outcome = dev(
         &runner,
-        Path::new("/repo"),
         Path::new("/repo/frontend"),
         &["cargo".to_string(), "test".to_string()],
         None,
@@ -58,30 +15,55 @@ fn dev_runs_through_bash_when_cargo_is_on_path() {
     assert!(outcome.ok());
     let calls = runner.calls.borrow();
     let call = calls.first().expect("one call");
-    assert_eq!(
-        call.args,
-        vec!["bash", "-c", "cd /repo/frontend && cargo test"]
-    );
+    assert_eq!(call.args, vec!["cargo", "test"]);
+    assert_eq!(call.cwd, PathBuf::from("/repo/frontend"));
     assert_eq!(call.stdin, None);
+    assert_eq!(call.stdout_file, None);
+    assert_eq!(call.stderr_file, None);
 }
 
 #[test]
 fn dev_falls_back_to_the_nix_shell_without_cargo() {
     let runner = FakeRunner::with(&[("nix develop", 0, "")]).tool("tokei");
 
-    dev(
-        &runner,
-        Path::new("/repo"),
-        Path::new("/repo"),
-        &["tokei".to_string()],
-        None,
-    );
+    dev(&runner, Path::new("/repo"), &["tokei".to_string()], None);
 
     let calls = runner.calls.borrow();
     let call = calls.first().expect("one call");
-    assert_eq!(call.args[..5], ["nix", "develop", "-c", "bash", "-c"]);
-    assert!(call.args[5].contains("cd /repo && tokei"));
+    assert_eq!(call.args, vec!["nix", "develop", "-c", "tokei"]);
+    assert_eq!(call.cwd, PathBuf::from("/repo"));
+    assert!(call.stdout_file.is_some());
+    assert!(call.stderr_file.is_some());
     assert_eq!(call.stdin, None);
+}
+
+#[test]
+fn dev_keeps_the_runner_streams_when_the_capture_files_are_gone() {
+    let runner = FakeRunner::with(&[("nix develop", 7, "tool output")]).tool("tokei");
+
+    let outcome = dev(&runner, Path::new("/repo"), &["tokei".to_string()], None);
+
+    assert_eq!(outcome.code, 7);
+    assert_eq!(outcome.stdout, "tool output");
+}
+
+#[test]
+fn exec_redirects_the_streams_when_files_are_asked_for() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let out_path = directory.path().join("out");
+    let err_path = directory.path().join("err");
+
+    let outcome = SystemRunner.exec(
+        &Command::new("/", ["sh", "-c", "printf out; printf err >&2"])
+            .stdout_file(out_path.clone())
+            .stderr_file(err_path.clone()),
+    );
+
+    assert!(outcome.ok());
+    assert_eq!(outcome.stdout, "");
+    assert_eq!(outcome.stderr, "");
+    assert_eq!(std::fs::read_to_string(&out_path).expect("stdout"), "out");
+    assert_eq!(std::fs::read_to_string(&err_path).expect("stderr"), "err");
 }
 
 #[test]
