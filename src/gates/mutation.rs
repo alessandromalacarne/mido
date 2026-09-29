@@ -13,12 +13,35 @@ use std::sync::OnceLock;
 
 pub const DEFAULT_MUTANT_TIMEOUT: i64 = 120;
 
+/// The summary line: `115 mutants tested in 6m: 96 caught, 19 unviable` —
+/// cargo-mutants leaves zero-valued categories (`0 missed`) out.
 fn summary_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| {
-        Regex::new(r"(\d+) mutants tested in [^:]+: (\d+) missed, (\d+) caught, (\d+) unviable")
-            .expect("valid pattern")
-    })
+    PATTERN
+        .get_or_init(|| Regex::new(r"(\d+) mutants tested in [^:]+: (.+)").expect("valid pattern"))
+}
+
+fn count_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| Regex::new(r"(\d+) (caught|missed|unviable)").expect("valid pattern"))
+}
+
+/// `(total, caught, missed, unviable)` from the summary line.
+fn summary_counts(output: &str) -> Option<(i64, i64, i64, i64)> {
+    let summary = summary_pattern().captures(output)?;
+    let total: i64 = summary[1].parse().unwrap_or_default();
+    let mut caught = 0;
+    let mut missed = 0;
+    let mut unviable = 0;
+    for count in count_pattern().captures_iter(&summary[2]) {
+        let value: i64 = count[1].parse().unwrap_or_default();
+        match &count[2] {
+            "caught" => caught = value,
+            "missed" => missed = value,
+            _ => unviable = value,
+        }
+    }
+    Some((total, caught, missed, unviable))
 }
 
 fn git_args(args: &[String]) -> Vec<&str> {
@@ -156,7 +179,7 @@ fn judge_mutation(
         .fixes(fix_hints("mutation").iter().copied());
     }
 
-    let Some(summary) = summary_pattern().captures(&output) else {
+    let Some((total, caught, missed, unviable)) = summary_counts(&output) else {
         return GateResult::new(
             "mutation",
             INCOMPLETE,
@@ -167,10 +190,6 @@ fn judge_mutation(
         .fixes(fix_hints("mutation").iter().copied());
     };
 
-    let total: i64 = summary[1].parse().unwrap_or_default();
-    let missed: i64 = summary[2].parse().unwrap_or_default();
-    let caught: i64 = summary[3].parse().unwrap_or_default();
-    let unviable: i64 = summary[4].parse().unwrap_or_default();
     let rate = percent(caught, caught + missed);
 
     let mut details = vec![format!(
@@ -187,7 +206,7 @@ fn judge_mutation(
     GateResult::new(
         "mutation",
         status,
-        format!("{rate:.1}% killed (min {})", general(minimum)),
+        format!("{rate:.1}% killed (min {minimum})"),
         details,
     )
     .contract(contract)
@@ -218,6 +237,28 @@ mod tests {
     }
 
     const SUMMARY: &str = "120 mutants tested in 3m: 10 missed, 105 caught, 5 unviable\n";
+
+    #[test]
+    fn a_summary_that_omits_the_zero_categories_is_read() {
+        let repo = repo();
+        let output = "115 mutants tested in 6m: 96 caught, 19 unviable\n";
+        let runner = FakeRunner::with(&[("cargo mutants", 0, output)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert_eq!(result.status, PASS);
+        assert!(result.summary.contains("100.0% killed (min 70)"));
+        assert!(result
+            .details
+            .iter()
+            .any(|line| line.contains("96 caught, 0 missed, 19 unviable")));
+    }
 
     #[test]
     fn a_kill_rate_above_the_minimum_passes_and_reports_the_numbers() {
