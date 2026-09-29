@@ -406,7 +406,9 @@ fn raise_blocked(
 
     let _ = writeln!(io.out, "{failure}");
     write_report(session.report_path.as_deref(), reports, io.out, io.style);
-    RunError::Failure(GateFailure::new(failure, final_verdict))
+    // The exit code is the ladder's own reading of the results: 1 when a gate
+    // failed, 2 when none could run to a verdict.
+    RunError::Failure(GateFailure::new(failure, final_verdict, exit_code(results)))
 }
 
 pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<i32, RunError> {

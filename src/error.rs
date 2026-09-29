@@ -78,23 +78,27 @@ impl fmt::Display for GuardrailsError {
 
 impl std::error::Error for GuardrailsError {}
 
-/// A gate failed. Carries the detailed report for the caller to print.
+/// A gate failed. Carries the detailed report for the caller to print, and the
+/// exit code its verdict implies: `1` when a gate `FAIL`ed, `2` when none could
+/// run to a verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateFailure {
     pub report: String,
     pub verdict: String,
+    code: i32,
 }
 
 impl GateFailure {
-    pub fn new(report: impl Into<String>, verdict: impl Into<String>) -> Self {
+    pub fn new(report: impl Into<String>, verdict: impl Into<String>, code: i32) -> Self {
         Self {
             report: report.into(),
             verdict: verdict.into(),
+            code,
         }
     }
 
     pub fn exit_code(&self) -> i32 {
-        1
+        self.code
     }
 }
 
@@ -106,7 +110,9 @@ impl fmt::Display for GateFailure {
 
 impl std::error::Error for GateFailure {}
 
-/// Either a run that could not produce a verdict (exit 2) or a blocked one (exit 1).
+/// Either a run that could not produce a verdict (exit 2) or a blocked one,
+/// which exits by what blocked it: 1 for a `FAIL`, 2 for a gate that never
+/// reached a verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunError {
     Error(GuardrailsError),
@@ -154,10 +160,11 @@ mod tests {
     }
 
     #[test]
-    fn errors_exit_two_and_failures_exit_one() {
+    fn errors_exit_two_and_blocked_runs_carry_their_code() {
         assert_eq!(GuardrailsError::setup("boom").exit_code(), 2);
         assert_eq!(GuardrailsError::config("boom").exit_code(), 2);
-        assert_eq!(GateFailure::new("report", "BLOCKED").exit_code(), 1);
+        assert_eq!(GateFailure::new("report", "BLOCKED", 1).exit_code(), 1);
+        assert_eq!(GateFailure::new("report", "BLOCKED", 2).exit_code(), 2);
     }
 
     #[test]
