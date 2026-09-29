@@ -11,7 +11,8 @@ pub mod syntax;
 use crate::config::Config;
 use crate::metrics::Unit;
 use crate::process::Runner;
-use crate::report::{GateResult, SKIPPED};
+use crate::report::{gate_line, gate_progress_line, GateResult, SKIPPED};
+use crate::style::Style;
 use crate::targets::Target;
 use std::io::Write;
 use std::path::Path;
@@ -52,7 +53,12 @@ pub struct GateRun<'a> {
     pub baseline_lcov: Option<&'a Path>,
 }
 
-pub fn run_gates(runner: &dyn Runner, run: &GateRun<'_>, out: &mut dyn Write) -> Vec<GateResult> {
+pub fn run_gates(
+    runner: &dyn Runner,
+    run: &GateRun<'_>,
+    out: &mut dyn Write,
+    style: Style,
+) -> Vec<GateResult> {
     // A deleted file has nothing to measure — the counting tools choke on a
     // path that is not there, so only files that still exist reach them.
     let rust_changed: Vec<String> = run
@@ -81,12 +87,16 @@ pub fn run_gates(runner: &dyn Runner, run: &GateRun<'_>, out: &mut dyn Write) ->
         Vec::new()
     };
 
+    let total = run.gates.len();
+    let width = run.gates.iter().map(|gate| gate.len()).max().unwrap_or(0);
     let mut results: Vec<GateResult> = Vec::new();
-    for gate in run.gates {
+    for (position, gate) in run.gates.iter().enumerate() {
+        announce(out, position + 1, total, width, gate, style);
         let result = run_one(runner, run, gate, &units, &tool_errors);
-        print_result(out, &result);
+        print_result(out, position + 1, total, width, &result, style);
         results.push(result);
     }
+    let _ = writeln!(out);
     results
 }
 
@@ -135,16 +145,46 @@ fn run_one(
     }
 }
 
-fn print_result(out: &mut dyn Write, result: &GateResult) {
-    let _ = writeln!(
-        out,
-        "[{}] {}: {}",
-        result.status, result.name, result.summary
-    );
-    for line in &result.details {
-        let _ = writeln!(out, "    {line}");
+/// The live line a long gate runs under; only a terminal can rewrite it in
+/// place, so a piped run never sees it.
+fn announce(
+    out: &mut dyn Write,
+    position: usize,
+    total: usize,
+    width: usize,
+    gate: &str,
+    style: Style,
+) {
+    if !style.on() {
+        return;
     }
-    let _ = writeln!(out);
+    let _ = write!(
+        out,
+        "{}",
+        gate_progress_line(position, total, width, gate, style)
+    );
+    let _ = out.flush();
+}
+
+fn print_result(
+    out: &mut dyn Write,
+    position: usize,
+    total: usize,
+    width: usize,
+    result: &GateResult,
+    style: Style,
+) {
+    if style.on() {
+        let _ = write!(out, "\r\u{1b}[2K");
+    }
+    let _ = writeln!(out, "{}", gate_line(position, total, width, result, style));
+    for line in &result.details {
+        // Some gates carry their own summary in the evidence list; it is already
+        // the line above, so it is not worth saying twice.
+        if line != &result.summary {
+            let _ = writeln!(out, "      {}", style.dim(line));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -198,10 +238,16 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut out,
+            Style::plain(),
         );
 
         assert_eq!(results[0].status, SKIPPED);
         assert!(results[0].contract.contains("enabled = false"));
+        let printed = String::from_utf8(out).expect("utf8");
+        assert!(
+            printed.contains("[1/1] · mutation"),
+            "a skipped gate still gets a line: {printed:?}"
+        );
     }
 
     #[test]
@@ -233,12 +279,114 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut out,
+            Style::plain(),
         );
 
         assert_eq!(results.len(), 4);
         let printed = String::from_utf8(out).expect("utf8");
-        assert!(printed.contains("[PASS] syntax"));
-        assert!(printed.contains("[INCOMPLETE] analysis"));
+        assert!(printed.contains("[1/4] ✓ syntax"));
+        assert!(printed.contains("[3/4] ! analysis"));
+    }
+
+    #[test]
+    fn a_running_gate_announces_itself_on_a_terminal() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner =
+            FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
+                .tool("cargo");
+        let mut out = Vec::new();
+
+        run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["tests".to_string(), "syntax".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut out,
+            Style::colored(),
+        );
+
+        let printed = String::from_utf8(out).expect("utf8");
+        assert!(
+            printed.contains("[1/2] ⋯ tests   running…"),
+            "the live line names the gate and its place: {printed:?}"
+        );
+        assert!(
+            printed.contains("[2/2] ⋯ syntax  running…"),
+            "and counts forward through the ladder: {printed:?}"
+        );
+        assert!(
+            printed.contains('\r'),
+            "the live line is rewritten in place: {printed:?}"
+        );
+    }
+
+    #[test]
+    fn a_piped_run_never_writes_a_live_line() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner =
+            FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
+                .tool("cargo");
+        let mut out = Vec::new();
+
+        run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["tests".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut out,
+            Style::plain(),
+        );
+
+        let printed = String::from_utf8(out).expect("utf8");
+        assert!(!printed.contains('\r'), "no rewriting without a terminal");
+        assert!(!printed.contains("running…"));
+        assert!(printed.contains("[1/1] ✓ tests"));
+    }
+
+    #[test]
+    fn a_detail_that_echoes_the_summary_is_not_printed_twice() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner =
+            FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
+                .tool("cargo");
+        let mut out = Vec::new();
+
+        run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["tests".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut out,
+            Style::plain(),
+        );
+
+        let printed = String::from_utf8(out).expect("utf8");
+        assert_eq!(
+            printed.matches("cargo test: 1 passed, 0 failed").count(),
+            1,
+            "{printed}"
+        );
     }
 
     #[test]
@@ -269,6 +417,7 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut Vec::new(),
+            Style::plain(),
         );
 
         assert_eq!(results[0].name, "size");
@@ -294,6 +443,7 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut Vec::new(),
+            Style::plain(),
         );
 
         assert_eq!(results[0].name, "coverage");
@@ -320,6 +470,7 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut Vec::new(),
+            Style::plain(),
         );
 
         let names: Vec<&str> = results.iter().map(|result| result.name.as_str()).collect();
@@ -344,6 +495,7 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut Vec::new(),
+            Style::plain(),
         );
 
         assert_eq!(results[0].status, crate::report::PASS);
@@ -369,6 +521,7 @@ mod tests {
                 baseline_lcov: None,
             },
             &mut Vec::new(),
+            Style::plain(),
         );
 
         assert!(!runner.called_with("rust-code-analysis-cli"));
