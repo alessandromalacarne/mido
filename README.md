@@ -59,7 +59,7 @@ project built with LLMs should not ship below. Start by copying this repo's
 - Runs the gates in a fixed order: **syntax → size → analysis → tests → coverage → mutation**.
 - Scopes the run to one **target** — the workspace, a member crate, a standalone
   crate, or one declared in the config. By default the target is inferred from
-  the diff.
+  the diff; `--path` measures the files, folders or targets you name instead.
 - Stamps the verdict on the exact revision it measured (`HEAD` plus a dirty-state
   hash), so a green verdict cannot be reused on changed code.
 - Prints a failure report meant for the next reader (human or agent): gate
@@ -166,8 +166,9 @@ so the dev shell provides the tools; otherwise commands are spawned directly.
 ## Usage
 
 ```
-mido [TARGET] [--repo PATH] [--base REF] [--gate GATE]… [--all] [--list-targets]
-     [--apply-workspace-aid] [--baseline-lcov PATH] [--report PATH] [--json]
+mido [TARGET] [--repo PATH] [--base REF] [--path PATH]… [--gate GATE]…
+     [--all] [--list-targets] [--apply-workspace-aid] [--baseline-lcov PATH]
+     [--report PATH] [--json]
 ```
 
 ```sh
@@ -176,6 +177,8 @@ mido frontend                 # one target, by name or path
 mido --all                    # every detected target, in turn
 mido --list-targets           # show what can be measured, then exit
 mido --base origin/main       # measure against another base
+mido --path src/gates        # measure these paths instead; no diff is read
+mido --path lib/src/lib.rs --path cli   # repeat for a file and a target name
 mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
 mido --report out.md          # write the markdown report
@@ -185,6 +188,31 @@ mido --baseline-lcov base.info         # coverage delta against a base revision
 The base is picked automatically when `--base` is omitted:
 `origin/mvp` → `origin/develop` → `origin/master` → `HEAD`. Changed files are
 the merge-base diff plus staged and untracked files.
+
+## Measuring paths instead of a diff
+
+`--path` replaces the diff as the source of the scope. Use it when there is no
+diff worth reading — a fresh checkout, re-verifying a corner of the tree, or a
+review of code nobody touched.
+
+The flag is repeatable — `--path a --path b` — and each entry is resolved
+against the repo:
+
+- a **file** is measured as it is;
+- a **folder** is walked, hidden entries skipped, in a stable order;
+- a **target name** (`workspace`, a member, a standalone crate, a declared
+  target) resolves to that target's directory.
+
+The rest of the ladder is unchanged. The `auto` target is still inferred — from
+the paths instead of the diff — a named target still wins, `--all` still walks
+every target, and each target measures only the paths it owns; a target owning
+none of them is skipped, exactly as with a diff. The banner and the report print
+`scope  explicit paths` where a diff-based run prints its `base`, and the
+mutation gate mutates the named files instead of a diff patch.
+
+`--path` and `--base` are mutually exclusive — there is no base to diff a path
+list against — and a path that does not exist, or lives outside the repo, is a
+setup error (exit 2).
 
 ## Targets
 
@@ -328,7 +356,7 @@ and the six gates are run against the diff before handoff.
 |--------|------|
 | `src/cli.rs` | the argv surface and exit codes |
 | `src/session.rs` | one run: what is measured, in what order, what is printed |
-| `src/targets.rs` | target detection and diff scoping |
+| `src/targets.rs` | target detection, path lists and diff scoping |
 | `src/config/` | `.guardrails.toml` loading, validation and defaults |
 | `src/gates/` | the six gates and their reporting |
 | `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report |
