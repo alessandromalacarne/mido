@@ -62,10 +62,12 @@ pub struct GateRun<'a> {
 }
 
 pub fn run_gates(runner: &dyn Runner, run: &GateRun<'_>, out: &mut dyn Write) -> Vec<GateResult> {
+    // A deleted file has nothing to measure — the counting tools choke on a
+    // path that is not there, so only files that still exist reach them.
     let rust_changed: Vec<String> = run
         .changed
         .iter()
-        .filter(|path| path.ends_with(RUST_EXT))
+        .filter(|path| path.ends_with(RUST_EXT) && run.repo.join(path).exists())
         .cloned()
         .collect();
     let mut tool_errors: Vec<String> = Vec::new();
@@ -266,6 +268,8 @@ mod tests {
     #[test]
     fn the_size_gate_gets_the_function_metrics_it_judges() {
         let repo = repo();
+        std::fs::create_dir_all(repo.root.join("src")).expect("dir");
+        std::fs::write(repo.root.join("src/foo.rs"), "").expect("file");
         let config = Config::load(&repo.root).expect("config loads");
         let document = serde_json::json!({
             "spaces": [{ "name": "f", "kind": "function", "metrics": { "loc": { "sloc": 5 } } }]
@@ -344,6 +348,31 @@ mod tests {
 
         let names: Vec<&str> = results.iter().map(|result| result.name.as_str()).collect();
         assert_eq!(names, vec!["tests", "syntax"]);
+    }
+
+    #[test]
+    fn a_deleted_rust_file_is_not_measured() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner = FakeRunner::default().tool("cargo");
+
+        let results = run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/gone.rs".to_string()],
+                gates: &["size".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut Vec::new(),
+        );
+
+        assert_eq!(results[0].status, crate::report::PASS);
+        assert_eq!(results[0].summary, "no rust changes");
+        assert!(!runner.called_with("tokei"));
     }
 
     #[test]

@@ -211,9 +211,10 @@ pub fn gate_size(
     tool_errors: &[String],
 ) -> GateResult {
     let limits = size_limits(config, target);
+    // A deleted file has nothing to measure — tokei fails on a path that is not there.
     let rust_files: Vec<String> = changed
         .iter()
-        .filter(|path| path.ends_with(RUST_EXT))
+        .filter(|path| path.ends_with(RUST_EXT) && target.dir(repo).join(path).exists())
         .cloned()
         .collect();
     let mut measurement_errors: Vec<String> = tool_errors.to_vec();
@@ -306,6 +307,12 @@ mod tests {
             path: "src/foo.rs".to_string(),
             ..Unit::new("src/foo.rs", name)
         }
+    }
+
+    fn touch(repo: &MiniRepo, path: &str) {
+        let full = repo.root.join(path);
+        std::fs::create_dir_all(full.parent().expect("parent")).expect("dir");
+        std::fs::write(&full, "").expect("file");
     }
 
     #[test]
@@ -454,6 +461,7 @@ mod tests {
     #[test]
     fn the_gate_fails_when_a_changed_file_is_over_the_ceiling() {
         let repo = MiniRepo::build(None);
+        touch(&repo, "src/foo.rs");
         let config = Config::load(&repo.root).expect("config loads");
         let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 600 } }] } });
         let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
@@ -477,6 +485,7 @@ mod tests {
     #[test]
     fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
         let repo = MiniRepo::build(None);
+        touch(&repo, "src/foo.rs");
         let config = Config::load(&repo.root).expect("config loads");
         let runner = FakeRunner::with(&[("tokei", 127, "")]);
 
