@@ -117,3 +117,43 @@ impl From<GuardrailsError> for RunError {
         RunError::Error(error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_error_renders_message_details_and_hint() {
+        let error = GuardrailsError::setup("cannot measure anything here")
+            .detail("no Cargo.toml under `scripts`")
+            .hint("pass --target frontend");
+
+        let rendered = error.render();
+
+        assert!(rendered.contains("error: cannot measure anything here"));
+        assert!(rendered.contains("no Cargo.toml under `scripts`"));
+        assert!(rendered.contains("hint: pass --target frontend"));
+    }
+
+    #[test]
+    fn config_error_renders_the_offending_line() {
+        let error = GuardrailsError::config("`.guardrails.toml` is not valid")
+            .detail("line 5: unknown key `min_mi` in [analysis]");
+
+        assert!(error.render().contains("line 5"));
+    }
+
+    #[test]
+    fn errors_exit_two_and_failures_exit_one() {
+        assert_eq!(GuardrailsError::setup("boom").exit_code(), 2);
+        assert_eq!(GuardrailsError::config("boom").exit_code(), 2);
+        assert_eq!(GateFailure::new("report", "BLOCKED").exit_code(), 1);
+    }
+
+    #[test]
+    fn display_matches_render() {
+        let error = GuardrailsError::setup("boom").detail("why");
+
+        assert_eq!(error.to_string(), error.render());
+    }
+}

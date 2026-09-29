@@ -373,3 +373,6 @@ fn owner_line(target: &Target, owned: &[&String]) -> String {
     let more = if paths.len() > 3 { " …" } else { "" };
     format!("{}: {shown}{more}", target.name)
 }
+
+#[cfg(test)]
+mod tests;

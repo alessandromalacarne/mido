@@ -113,3 +113,38 @@ pub fn main_with(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_target_is_auto() {
+        assert_eq!(parse_from(&[]).target, "auto");
+    }
+
+    #[test]
+    fn every_gate_name_is_selectable() {
+        let args = parse_from(&["--gate", "coverage"]);
+
+        assert_eq!(args.gates, vec![Gate::Coverage]);
+    }
+
+    #[test]
+    fn flags_argv() {
+        let args = parse_from(&[
+            "--repo",
+            "/tmp/x",
+            "frontend",
+            "--base",
+            "origin/mvp",
+            "--json",
+            "--all",
+        ]);
+
+        assert_eq!(args.repo, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(args.target, "frontend");
+        assert_eq!(args.base.as_deref(), Some("origin/mvp"));
+        assert!(args.json && args.all);
+    }
+}

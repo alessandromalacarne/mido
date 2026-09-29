@@ -197,3 +197,214 @@ fn judge_mutation(
 fn tail(output: &str) -> Vec<String> {
     last_lines(output, 10)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{FakeRunner, MiniRepo};
+
+    fn repo() -> MiniRepo {
+        MiniRepo::build(None)
+    }
+
+    fn config_for(repo: &MiniRepo) -> Config {
+        Config::load(&repo.root).expect("config loads")
+    }
+
+    fn scratch(repo: &MiniRepo) -> std::path::PathBuf {
+        let scratch = repo.root.join("scratch");
+        std::fs::create_dir_all(&scratch).expect("scratch");
+        scratch
+    }
+
+    const SUMMARY: &str = "120 mutants tested in 3m: 10 missed, 105 caught, 5 unviable\n";
+
+    #[test]
+    fn a_kill_rate_above_the_minimum_passes_and_reports_the_numbers() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert_eq!(result.status, PASS);
+        assert!(result.summary.contains("91.3% killed (min 70)"));
+        assert!(result.details[0].contains("120 mutants: 105 caught, 10 missed, 5 unviable"));
+    }
+
+    #[test]
+    fn a_kill_rate_below_the_minimum_fails_and_lists_the_survivors() {
+        let repo = repo();
+        let output =
+            "100 mutants tested in 3m: 60 missed, 40 caught, 0 unviable\nMISSED  src/foo.rs:12:5 replace + with - in parse\n";
+        let runner = FakeRunner::with(&[("cargo mutants", 0, output)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert_eq!(result.status, FAIL);
+        assert!(result.summary.contains("40.0% killed (min 70)"));
+        assert!(result
+            .details
+            .iter()
+            .any(|line| line.starts_with("MISSED  src/foo.rs")));
+    }
+
+    #[test]
+    fn an_endless_run_times_out_as_incomplete() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("cargo mutants", 124, "still going")]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert_eq!(result.status, INCOMPLETE);
+        assert!(result.summary.contains("timed out after 3600s"));
+    }
+
+    #[test]
+    fn output_without_a_summary_is_incomplete() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("cargo mutants", 0, "cargo-mutants: nothing to do")]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert_eq!(result.status, INCOMPLETE);
+        assert_eq!(result.summary, "cargo-mutants produced no summary");
+    }
+
+    #[test]
+    fn the_changed_scope_writes_the_working_tree_patch_first() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("git diff", 0, "diff --git a/src/foo.rs b/src/foo.rs\n")]);
+        let scratch = scratch(&repo);
+
+        let args = changed_scope_args(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &scratch.join("patch"),
+        )
+        .expect("patch written");
+
+        assert!(args[0] == "--in-place" && args[1] == "--in-diff");
+        let patch = std::fs::read_to_string(scratch.join("patch")).expect("patch");
+        assert!(patch.contains("diff --git"));
+    }
+
+    #[test]
+    fn untracked_rust_files_are_added_to_the_index_and_then_released() {
+        let repo = repo();
+        let runner = FakeRunner {
+            responses: vec![
+                (
+                    "ls-files".to_string(),
+                    crate::process::Outcome::new(0, "frontend/src/new.rs\nREADME.md\n", ""),
+                ),
+                (
+                    "git diff".to_string(),
+                    crate::process::Outcome::new(0, "diff\n", ""),
+                ),
+            ],
+            ..FakeRunner::default()
+        };
+
+        changed_scope_args(
+            &runner,
+            &repo.root,
+            &Target::crate_target("frontend", false),
+            &scratch(&repo).join("patch"),
+        )
+        .expect("patch written");
+
+        assert!(runner.called_with("add -N frontend/src/new.rs"));
+        assert!(!runner.called_with("add -N README.md"));
+        assert!(runner.called_with("reset -q -- frontend/src/new.rs"));
+        assert!(runner.called_with("--relative=frontend"));
+    }
+
+    #[test]
+    fn the_scope_setting_can_name_a_path_instead_of_the_diff() {
+        let repo = MiniRepo::build(Some(
+            "
+            version = 1
+
+            [mutation]
+            scope = \"src/parser.rs\"
+        ",
+        ));
+        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert!(result.contract.contains("--file src/parser.rs"));
+        assert!(result.contract.contains("scope=src/parser.rs"));
+    }
+
+    #[test]
+    fn the_all_scope_mutates_in_place_without_a_patch() {
+        let repo = MiniRepo::build(Some(
+            "
+            version = 1
+
+            [mutation]
+            scope = \"all\"
+        ",
+        ));
+        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert!(result.contract.contains("--in-place"));
+        assert!(!result.contract.contains("--in-diff"));
+    }
+
+    #[test]
+    fn the_mutant_timeout_is_passed_through() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &scratch(&repo),
+        );
+
+        assert!(result.contract.contains("--timeout 120"));
+    }
+}

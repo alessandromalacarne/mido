@@ -8,3 +8,6 @@ pub mod process;
 pub mod report;
 pub mod session;
 pub mod targets;
+
+#[cfg(test)]
+mod test_support;

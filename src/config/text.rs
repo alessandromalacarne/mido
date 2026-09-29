@@ -42,3 +42,53 @@ pub fn located(text: &str, key: &str, section: Option<&str>) -> String {
         None => String::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = "\
+version = 1
+
+[analysis]
+mi_min = 20
+min_mi = 20
+
+[targets.frontend]
+path = \"frontend\"
+";
+
+    #[test]
+    fn a_key_is_located_inside_its_section() {
+        assert_eq!(find_line(SAMPLE, "min_mi", Some("analysis")), Some(5));
+        assert_eq!(find_line(SAMPLE, "path", Some("targets.frontend")), Some(8));
+    }
+
+    #[test]
+    fn a_section_name_is_not_mistaken_for_a_key() {
+        assert_eq!(find_line(SAMPLE, "analysis", Some("analysis")), None);
+    }
+
+    #[test]
+    fn a_missing_key_has_no_line() {
+        assert_eq!(find_line(SAMPLE, "ghost", None), None);
+    }
+
+    #[test]
+    fn the_first_assignment_anywhere_is_found_without_a_section() {
+        assert_eq!(find_line(SAMPLE, "path", None), Some(8));
+    }
+
+    #[test]
+    fn section_detection_looks_at_whole_lines() {
+        assert!(is_section(SAMPLE, "analysis"));
+        assert!(!is_section(SAMPLE, "mi_min"));
+        assert!(!is_section("analysis = 3\n", "analysis"));
+    }
+
+    #[test]
+    fn located_prefixes_the_line_when_there_is_one() {
+        assert_eq!(located(SAMPLE, "min_mi", Some("analysis")), "line 5: ");
+        assert_eq!(located(SAMPLE, "ghost", Some("analysis")), "");
+    }
+}

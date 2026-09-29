@@ -153,3 +153,219 @@ fn print_result(out: &mut dyn Write, result: &GateResult) {
     }
     let _ = writeln!(out);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::test_support::{FakeRunner, MiniRepo};
+
+    fn repo() -> MiniRepo {
+        MiniRepo::build(None)
+    }
+
+    #[test]
+    fn every_gate_has_a_fix_hint() {
+        for gate in [
+            "syntax", "size", "analysis", "tests", "coverage", "mutation",
+        ] {
+            assert!(!fix_hints(gate).is_empty(), "{gate} needs a fix hint");
+        }
+        assert!(fix_hints("tests")[0].contains("never skip"));
+        assert!(fix_hints("coverage")[0].contains("behavior tests"));
+        assert!(fix_hints("mutation")[0].contains("equivalence justification"));
+        assert!(fix_hints("analysis")[0].contains("padding comments"));
+        assert!(fix_hints("size")[0].contains("real seam"));
+        assert!(fix_hints("syntax")[0].contains("fix the diagnostics"));
+        assert!(fix_hints("unknown-gate").is_empty());
+    }
+
+    #[test]
+    fn thresholds_render_without_a_trailing_zero() {
+        assert_eq!(general(20.0), "20");
+        assert_eq!(general(12.5), "12.5");
+        assert_eq!(general(-3.0), "-3");
+        assert_eq!(general(0.0), "0");
+    }
+
+    #[test]
+    fn an_enormous_threshold_stays_a_plain_float() {
+        // Past 1e15 the integer cast would lose the value, so the float stands.
+        assert_eq!(general(1e16), "10000000000000000");
+        assert!(general(1e16).contains("10000000000000000"));
+    }
+
+    #[test]
+    fn a_disabled_gate_reports_itself_as_skipped() {
+        let repo = MiniRepo::build(Some(
+            "
+            version = 1
+
+            [mutation]
+            enabled = false
+        ",
+        ));
+        let config = Config::load(&repo.root).expect("config loads");
+        let mut out = Vec::new();
+
+        let results = run_gates(
+            &FakeRunner::default(),
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &[],
+                gates: &["mutation".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut out,
+        );
+
+        assert_eq!(results[0].status, SKIPPED);
+        assert!(results[0].contract.contains("enabled = false"));
+    }
+
+    #[test]
+    fn every_gate_reports_a_line_of_its_own() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 3 } }] } });
+        let runner = FakeRunner::with(&[
+            ("tokei", 0, &tokei.to_string()),
+            ("cargo test", 0, "test result: ok. 1 passed; 0 failed\n"),
+        ])
+        .tool("cargo");
+        let mut out = Vec::new();
+
+        let results = run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &[
+                    "syntax".to_string(),
+                    "size".to_string(),
+                    "analysis".to_string(),
+                    "tests".to_string(),
+                ],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut out,
+        );
+
+        assert_eq!(results.len(), 4);
+        let printed = String::from_utf8(out).expect("utf8");
+        assert!(printed.contains("[PASS] syntax"));
+        assert!(printed.contains("[INCOMPLETE] analysis"));
+    }
+
+    #[test]
+    fn the_size_gate_gets_the_function_metrics_it_judges() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let document = serde_json::json!({
+            "spaces": [{ "name": "f", "kind": "function", "metrics": { "loc": { "sloc": 5 } } }]
+        });
+        let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 10 } }] } });
+        let runner = FakeRunner::with(&[
+            ("rust-code-analysis-cli", 0, &document.to_string()),
+            ("tokei", 0, &tokei.to_string()),
+        ])
+        .tool("cargo");
+
+        let results = run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["size".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut Vec::new(),
+        );
+
+        assert_eq!(results[0].name, "size");
+        assert_eq!(results[0].status, crate::report::PASS);
+        assert!(results[0].summary.contains("worst function 5 sloc"));
+    }
+
+    #[test]
+    fn the_coverage_gate_is_dispatched_under_its_own_name() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner = FakeRunner::with(&[("llvm-cov", 101, "no coverage tool here")]).tool("cargo");
+
+        let results = run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["coverage".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut Vec::new(),
+        );
+
+        assert_eq!(results[0].name, "coverage");
+        assert_eq!(results[0].status, crate::report::INCOMPLETE);
+    }
+
+    #[test]
+    fn the_gates_run_in_the_order_they_were_asked_for() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner =
+            FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
+                .tool("cargo");
+
+        let results = run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["tests".to_string(), "syntax".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut Vec::new(),
+        );
+
+        let names: Vec<&str> = results.iter().map(|result| result.name.as_str()).collect();
+        assert_eq!(names, vec!["tests", "syntax"]);
+    }
+
+    #[test]
+    fn units_are_only_measured_for_the_gates_that_need_them() {
+        let repo = repo();
+        let config = Config::load(&repo.root).expect("config loads");
+        let runner = FakeRunner::with(&[("rust-code-analysis-cli", 1, "")]).tool("cargo");
+
+        run_gates(
+            &runner,
+            &GateRun {
+                repo: &repo.root,
+                target: &Target::workspace_target(),
+                config: &config,
+                changed: &["src/foo.rs".to_string()],
+                gates: &["syntax".to_string()],
+                scratch: &repo.root,
+                baseline_lcov: None,
+            },
+            &mut Vec::new(),
+        );
+
+        assert!(!runner.called_with("rust-code-analysis-cli"));
+    }
+}

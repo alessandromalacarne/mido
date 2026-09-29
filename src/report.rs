@@ -308,3 +308,6 @@ pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_
     lines.push(String::new());
     lines.join("\n")
 }
+
+#[cfg(test)]
+mod tests;

@@ -404,3 +404,6 @@ pub fn pick_base(runner: &dyn Runner, repo: &Path) -> String {
     }
     "HEAD".to_string()
 }
+
+#[cfg(test)]
+mod tests;

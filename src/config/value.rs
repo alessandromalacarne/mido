@@ -65,3 +65,46 @@ pub fn string_list(value: &Value) -> Option<Vec<String>> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integers_and_floats_read_as_numbers() {
+        assert_eq!(as_int(&Value::Integer(300)), Some(300));
+        assert_eq!(as_int(&Value::Float(300.0)), Some(300));
+        assert_eq!(as_float(&Value::Integer(20)), Some(20.0));
+        assert_eq!(as_int(&Value::String("300".into())), None);
+    }
+
+    #[test]
+    fn scalar_rendering_covers_every_literal() {
+        assert_eq!(render(&Value::String("cargo test".into())), "cargo test");
+        assert_eq!(render(&Value::Integer(3)), "3");
+        assert_eq!(render(&Value::Boolean(true)), "true");
+    }
+
+    #[test]
+    fn commands_may_be_one_string_or_a_list() {
+        assert_eq!(
+            command_list(&Value::String("cargo test".into())),
+            Some(vec!["cargo test".to_string()])
+        );
+        assert_eq!(
+            command_list(&Value::Array(vec![
+                Value::String("a".into()),
+                Value::String("b".into())
+            ])),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(command_list(&Value::Integer(3)), None);
+    }
+
+    #[test]
+    fn python_type_names_survive() {
+        assert_eq!(type_name(&Value::Integer(1)), "int");
+        assert_eq!(type_name(&Value::Table(Table::new())), "dict");
+        assert_eq!(type_name(&Value::Array(vec![])), "list");
+    }
+}

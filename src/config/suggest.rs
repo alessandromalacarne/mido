@@ -56,3 +56,48 @@ fn longest_common_subsequence(left: &[char], right: &[char]) -> usize {
     }
     previous[right.len()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn known() -> BTreeSet<&'static str> {
+        ["mi_min", "cognitive_max", "min_mi"].into_iter().collect()
+    }
+
+    #[test]
+    fn a_near_miss_key_is_named_back() {
+        assert_eq!(
+            suggestion("min_mi", &["mi_min", "cognitive_max"].into_iter().collect()),
+            "did you mean `mi_min`?"
+        );
+    }
+
+    #[test]
+    fn a_far_key_lists_what_is_known() {
+        let suggestion = suggestion("totally_unrelated_option", &known());
+
+        assert!(suggestion.starts_with("known keys: "));
+        assert!(suggestion.contains("mi_min"));
+    }
+
+    #[test]
+    fn identical_strings_score_one() {
+        assert_eq!(ratio("mi_min", "mi_min"), 1.0);
+        assert_eq!(ratio("", ""), 1.0);
+        assert_eq!(ratio("abc", "xyz"), 0.0);
+    }
+
+    #[test]
+    fn ratio_is_the_difflib_mean() {
+        // "mi_min" vs "min_mi": LCS "mi_mi" is 5 of 12 characters.
+        assert!((ratio("mi_min", "min_mi") - 10.0 / 12.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn the_best_match_wins_over_a_merely_close_one() {
+        let known: BTreeSet<&str> = ["tests", "test", "lint"].into_iter().collect();
+
+        assert_eq!(closest_match("test", &known).as_deref(), Some("test"));
+    }
+}

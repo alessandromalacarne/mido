@@ -176,3 +176,132 @@ pub fn touches(diagnostic_path: &str, changed: &[String]) -> bool {
         .iter()
         .any(|path| diagnostic_path.ends_with(path.as_str()) || path.ends_with(diagnostic_path))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target() -> Target {
+        Target::crate_target("frontend", false)
+    }
+
+    #[test]
+    fn a_document_yields_its_functions_at_any_depth() {
+        let document = serde_json::json!({
+            "name": "src/foo.rs",
+            "metrics": {},
+            "spaces": [
+                {
+                    "name": "outer",
+                    "kind": "function",
+                    "metrics": { "loc": { "sloc": 12 }, "cyclomatic": { "sum": 3 }, "cognitive": { "sum": 2 }, "mi": { "mi_original": 55.5 } },
+                    "spaces": [
+                        { "name": "inner", "kind": "method", "metrics": { "loc": { "sloc": 4 } } }
+                    ]
+                },
+                { "name": "mod", "kind": "unit", "spaces": [] }
+            ]
+        });
+
+        let units = units_from_document("src/foo.rs", &document);
+
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].name, "outer");
+        assert_eq!(units[0].sloc, 12);
+        assert_eq!(units[0].cyclomatic, 3);
+        assert_eq!(units[0].cognitive, 2);
+        assert!((units[0].mi - 55.5).abs() < f64::EPSILON);
+        assert_eq!(units[1].name, "inner");
+        assert_eq!(units[1].path, "src/foo.rs");
+    }
+
+    #[test]
+    fn nesting_comes_from_whichever_family_the_version_prints() {
+        let document = serde_json::json!({
+            "spaces": [{ "name": "f", "kind": "function", "metrics": { "nested_control_flow": { "sum": 3 } } }]
+        });
+
+        assert_eq!(units_from_document("a.rs", &document)[0].nesting, Some(3));
+
+        let document = serde_json::json!({
+            "spaces": [{ "name": "f", "kind": "function", "metrics": { "nesting": { "sum": 2 } } }]
+        });
+        assert_eq!(units_from_document("a.rs", &document)[0].nesting, Some(2));
+
+        let document = serde_json::json!({
+            "spaces": [{ "name": "f", "kind": "function", "metrics": {} }]
+        });
+        assert_eq!(units_from_document("a.rs", &document)[0].nesting, None);
+    }
+
+    #[test]
+    fn a_bare_array_document_is_walked_too() {
+        let document = serde_json::json!([
+            { "spaces": [{ "name": "f", "kind": "function", "metrics": {} }] }
+        ]);
+
+        assert_eq!(units_from_document("a.rs", &document).len(), 1);
+    }
+
+    #[test]
+    fn lcov_counts_each_source_file() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let report = directory.path().join("lcov.info");
+        std::fs::write(
+            &report,
+            "SF:/repo/lib/src/foo.rs\nLF:10\nLH:2\nend_of_record\nSF:/repo/lib/src/bar.rs\nLF:4\nLH:4\nend_of_record\n",
+        )
+        .expect("report");
+
+        let files = lcov_files(&report);
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(
+            files["/repo/lib/src/foo.rs"],
+            LcovStat {
+                lines_found: 10,
+                lines_hit: 2
+            }
+        );
+        assert_eq!(
+            files["/repo/lib/src/bar.rs"],
+            LcovStat {
+                lines_found: 4,
+                lines_hit: 4
+            }
+        );
+    }
+
+    #[test]
+    fn a_missing_report_measures_nothing() {
+        assert!(lcov_files(Path::new("/nonexistent/lcov.info")).is_empty());
+    }
+
+    #[test]
+    fn percent_handles_the_empty_denominator() {
+        assert_eq!(percent(0, 0), 0.0);
+        assert_eq!(percent(2, 10), 20.0);
+    }
+
+    #[test]
+    fn paths_are_shown_relative_to_the_target() {
+        assert_eq!(
+            relative_to("/repo/frontend/src/main.rs", &target()),
+            "src/main.rs"
+        );
+        assert_eq!(
+            relative_to("/repo/frontend/src/main.rs", &Target::workspace_target()),
+            "repo/frontend/src/main.rs"
+        );
+        assert_eq!(relative_to("src/main.rs", &target()), "src/main.rs");
+    }
+
+    #[test]
+    fn a_diagnostic_touches_a_changed_file_in_either_direction() {
+        let changed = vec!["src/main.rs".to_string()];
+
+        assert!(touches("src/main.rs", &changed));
+        assert!(touches("/abs/path/src/main.rs", &changed));
+        assert!(!touches("src/other.rs", &changed));
+    }
+}

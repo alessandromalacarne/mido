@@ -401,3 +401,6 @@ pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<
     write_report(session.report_path.as_deref(), &reports, io.out);
     Ok(0)
 }
+
+#[cfg(test)]
+mod tests;

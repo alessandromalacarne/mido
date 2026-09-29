@@ -268,3 +268,6 @@ impl Config {
         default
     }
 }
+
+#[cfg(test)]
+mod tests;

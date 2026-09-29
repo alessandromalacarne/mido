@@ -193,3 +193,227 @@ fn tail_details(output: &str) -> Vec<String> {
         .map(|line| format!("  {}", line.trim()))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{FakeRunner, MiniRepo};
+
+    fn repo(config: Option<&str>) -> MiniRepo {
+        MiniRepo::build(config)
+    }
+
+    fn config_for(repo: &MiniRepo) -> Config {
+        Config::load(&repo.root).expect("config loads")
+    }
+
+    #[test]
+    fn the_workspace_inherits_the_root_test_command() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test --all-features\"
+        ",
+        ));
+
+        assert_eq!(
+            test_commands(&config_for(&repo), &Target::workspace_target(), &repo.root),
+            vec!["cargo test --all-features"]
+        );
+    }
+
+    #[test]
+    fn a_standalone_crate_does_not_inherit_the_root_test_command() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test --all-features\"
+
+            [targets.frontend.tests]
+            command = \"cargo test --target wasm32-unknown-unknown\"
+        ",
+        ));
+        let config = config_for(&repo);
+        let frontend = Target::crate_target("frontend", false);
+
+        assert_eq!(
+            test_commands(&config, &frontend, &repo.root),
+            vec!["cargo test --target wasm32-unknown-unknown"]
+        );
+    }
+
+    #[test]
+    fn a_standalone_crate_without_its_own_command_falls_back_to_cargo_test() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test --all-features\"
+        ",
+        ));
+        let config = config_for(&repo);
+
+        assert_eq!(
+            test_commands(&config, &Target::crate_target("desktop", false), &repo.root),
+            vec!["cargo test"]
+        );
+    }
+
+    #[test]
+    fn a_crate_that_browser_tests_gets_a_second_wasm_command() {
+        let repo = repo(None);
+        let manifest = repo.root.join("frontend/Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).expect("manifest");
+        std::fs::write(
+            &manifest,
+            format!("{text}\n[dev-dependencies]\nwasm-bindgen-test = \"=0.3.73\"\n"),
+        )
+        .expect("manifest");
+        let config = config_for(&repo);
+
+        assert_eq!(
+            test_commands(
+                &config,
+                &Target::crate_target("frontend", false),
+                &repo.root
+            ),
+            vec!["cargo test", "cargo test --target wasm32-unknown-unknown"]
+        );
+    }
+
+    #[test]
+    fn a_crate_without_browser_tests_runs_once() {
+        let repo = repo(None);
+
+        assert_eq!(
+            test_commands(
+                &config_for(&repo),
+                &Target::crate_target("desktop", false),
+                &repo.root
+            ),
+            vec!["cargo test"]
+        );
+    }
+
+    #[test]
+    fn a_crate_that_does_not_browser_test_through_the_macro_runs_once() {
+        let repo = repo(None);
+        let manifest = repo.root.join("frontend/Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).expect("manifest");
+        std::fs::write(
+            &manifest,
+            format!("{text}\n[dev-dependencies]\nsome-other-helper = \"1\"\n"),
+        )
+        .expect("manifest");
+
+        assert_eq!(
+            test_commands(
+                &config_for(&repo),
+                &Target::crate_target("frontend", false),
+                &repo.root
+            ),
+            vec!["cargo test"]
+        );
+    }
+
+    #[test]
+    fn failing_tests_are_named_in_the_tests_gate() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test --all-features\"
+        ",
+        ));
+        let output = "test thing::works ... ok\ntest thing::breaks ... FAILED\n\ntest result: FAILED. 1 passed; 1 failed\n";
+        let runner = FakeRunner::with(&[("cargo test", 101, output)]);
+
+        let result = gate_tests(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+        );
+
+        assert_eq!(result.status, FAIL);
+        assert!(result.details.join(" ").contains("thing::breaks"));
+        assert!(result.contract.contains("cargo test --all-features"));
+    }
+
+    #[test]
+    fn a_green_suite_reports_its_counts() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test\"
+        ",
+        ));
+        let output = "test result: ok. 41 passed; 0 failed; 0 ignored\n";
+        let runner = FakeRunner::with(&[("cargo test", 0, output)]);
+
+        let result = gate_tests(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+        );
+
+        assert_eq!(result.status, PASS);
+        assert_eq!(result.summary, "cargo test: 41 passed, 0 failed");
+    }
+
+    #[test]
+    fn tests_gate_fails_when_the_command_prints_no_summary() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test\"
+        ",
+        ));
+        let runner = FakeRunner::with(&[("cargo test", 127, "cargo: command not found")]);
+
+        let result = gate_tests(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+        );
+
+        assert_eq!(result.status, FAIL);
+        assert!(result.details.join(" ").contains("no test summary"));
+    }
+
+    #[test]
+    fn a_nonzero_exit_with_every_test_green_is_still_a_failure() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [tests]
+            command = \"cargo test\"
+        ",
+        ));
+        let runner =
+            FakeRunner::with(&[("cargo test", 101, "test result: ok. 3 passed; 0 failed\n")]);
+
+        let result = gate_tests(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+        );
+
+        assert_eq!(result.status, FAIL);
+        assert!(result.details.join(" ").contains("`cargo test`: 0 failed"));
+    }
+}

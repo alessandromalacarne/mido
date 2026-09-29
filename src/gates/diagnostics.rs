@@ -171,3 +171,147 @@ fn diagnostic_message(lines: &[&str], index: usize) -> String {
     }
     String::new()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formatting_differences_in_changed_files_are_the_problem() {
+        let outcome = format_step(
+            "Diff in src/foo.rs:3:\nDiff in src/bar.rs:1:\n",
+            &["src/foo.rs".to_string()],
+        );
+
+        assert_eq!(outcome.problems.len(), 1);
+        assert!(outcome.problems[0].contains("src/foo.rs"));
+        assert!(outcome.crate_wide_debt);
+        assert!(outcome.details[0].contains("2 file(s) with diffs, 1 of them changed here"));
+    }
+
+    #[test]
+    fn a_clean_format_pass_has_nothing_to_report() {
+        let outcome = format_step("", &["src/foo.rs".to_string()]);
+
+        assert!(outcome.problems.is_empty());
+        assert!(!outcome.crate_wide_debt);
+    }
+
+    #[test]
+    fn diagnostics_report_the_message_above_the_location() {
+        let problems = extract_diagnostics(
+            "error: mismatched types\n  --> src/foo.rs:12:5\n",
+            &["src/foo.rs".to_string()],
+        );
+
+        assert_eq!(problems, vec!["src/foo.rs:12:5 error: mismatched types"]);
+    }
+
+    #[test]
+    fn a_diagnostic_without_a_severity_line_keeps_just_its_location() {
+        let problems = extract_diagnostics(
+            "error[E0308]: mismatched types\n  --> src/foo.rs:12:5\n",
+            &["src/foo.rs".to_string()],
+        );
+
+        assert_eq!(problems, vec!["src/foo.rs:12:5"]);
+    }
+
+    #[test]
+    fn diagnostics_outside_the_changed_files_are_left_alone() {
+        let problems = extract_diagnostics(
+            "warning: elsewhere\n  --> src/other.rs:1:1\n",
+            &["src/foo.rs".to_string()],
+        );
+
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_diagnostic_step_counts_what_it_could_and_could_not_attribute() {
+        let outcome = diagnostic_step(
+            "lint",
+            "cargo clippy",
+            "warning: unused\n  --> src/foo.rs:1:1\nwarning: old\n  --> src/old.rs:2:2\n",
+            1,
+            &["src/foo.rs".to_string()],
+        );
+
+        assert_eq!(outcome.problems.len(), 1);
+        assert!(outcome.crate_wide_debt);
+        assert!(outcome.details[0].contains("2 diagnostic(s), 1 of them in changed files"));
+    }
+
+    #[test]
+    fn a_failing_step_with_no_diagnostics_is_not_a_pass() {
+        let outcome = diagnostic_step(
+            "lint",
+            "cargo clippy",
+            "error: could not compile `mido`\n",
+            101,
+            &["src/foo.rs".to_string()],
+        );
+
+        assert_eq!(outcome.problems.len(), 1);
+        assert!(outcome.problems[0].contains("exited 101"));
+        assert!(outcome
+            .details
+            .iter()
+            .any(|line| line.starts_with("lint: error:")));
+    }
+
+    #[test]
+    fn a_passing_step_with_foreign_diagnostics_is_crate_wide_debt() {
+        let outcome = diagnostic_step(
+            "typecheck",
+            "cargo check",
+            "warning: pre-existing\n  --> src/old.rs:2:2\n",
+            0,
+            &["src/foo.rs".to_string()],
+        );
+
+        assert!(outcome.problems.is_empty());
+        assert!(outcome.crate_wide_debt);
+    }
+
+    #[test]
+    fn the_same_diagnostic_from_two_tools_is_kept_once() {
+        let problems = dedupe_problems(&[
+            "src/foo.rs:9:9 error: unused variable: `x`".to_string(),
+            "src/foo.rs:9:9 warning: unused variable: `x`".to_string(),
+        ]);
+
+        assert_eq!(problems.len(), 1);
+    }
+
+    #[test]
+    fn different_diagnostics_are_both_kept() {
+        let problems = dedupe_problems(&[
+            "src/foo.rs:9:9 error: unused variable: `x`".to_string(),
+            "src/foo.rs:4:1 warning: unused import: `std::io`".to_string(),
+        ]);
+
+        assert_eq!(problems.len(), 2);
+        assert_eq!(problems[0], "src/foo.rs:9:9 error: unused variable: `x`");
+    }
+
+    #[test]
+    fn the_last_report_of_a_duplicate_wins() {
+        let problems = dedupe_problems(&[
+            "src/foo.rs:9:9 error: unused variable: `x`".to_string(),
+            "src/foo.rs:9:9 warning: unused variable: `x`".to_string(),
+        ]);
+
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0], "src/foo.rs:9:9 warning: unused variable: `x`");
+    }
+
+    #[test]
+    fn a_key_folds_the_severity_but_keeps_the_message() {
+        assert_eq!(
+            diagnostic_key("src/foo.rs:9:9 warning: unused variable: `x`"),
+            "src/foo.rs:9:9 unused variable: `x`"
+        );
+        assert_eq!(diagnostic_key("bare"), "bare ");
+    }
+}
