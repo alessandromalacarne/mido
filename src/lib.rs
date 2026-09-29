@@ -7,6 +7,7 @@ pub mod metrics;
 pub mod process;
 pub mod report;
 pub mod session;
+pub mod style;
 pub mod targets;
 
 #[cfg(test)]
