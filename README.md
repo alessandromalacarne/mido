@@ -26,6 +26,9 @@ mido assumes an LLM wrote the change and an LLM reads the result.
   into a gate.
 - Output defaults to where agent sessions already keep their artifacts
   (`$COMMANDCODE_SCRATCHPAD`), and `--json` turns the verdict machine-readable.
+- Rendering is honest about who is watching: piped (or with `NO_COLOR`,
+  `TERM=dumb`) the run drops colour and the live status line, so what an agent
+  captures is a stable, diffable log of the same panels and gate lines.
 
 ## Opinionated by design
 
@@ -97,6 +100,51 @@ A `SKIPPED` gate is not a passed gate: `0` is reserved for gates that actually
 ran and passed. `INCOMPLETE` is never a pass either — fix the tooling (usually
 `nix develop`) and re-run before handing the work off.
 
+## Reading the output
+
+A run has a shape: the banner opens it, one line per gate walks the ladder, the
+verdict panel closes it.
+
+```
+╭─ mido ──────────────────────────────────────────────╮
+│ target   workspace (./) [auto]                      │
+│ base     origin/master                              │
+│ revision febf29d1                                   │
+│ dirty    bddc06f7                                   │
+│ changed  1 files (1 rust)                           │
+│ runner   src/main.rs (declared by .guardrails.toml) │
+╰─────────────────────────────────────────────────────╯
+  src/style.rs
+
+  [1/1] ✓ syntax  clean
+      format: 0 file(s) with diffs, 0 of them changed here
+      lint: 0 diagnostic(s), 0 of them in changed files
+      typecheck: 0 diagnostic(s), 0 of them in changed files
+
+╭─ verdict ──╮
+│ SHIP-READY │
+╰────────────╯
+revision stamp: febf29d11eec8ddb2bdea1f5fb1d01524543dc34 | bddc06f72e892e557a404e502473cd371127778a
+```
+
+- A gate line carries its place in the selection, a status glyph, the gate name
+  in a fixed column and the one-line summary: `✓` PASS, `✗` FAIL, `!` INCOMPLETE,
+  `·` SKIPPED. The glyph is the fallback channel — colour never carries the
+  verdict alone.
+- While a slow gate runs, a terminal sees a `[place] ⋯ name  running…` line under
+  the ladder, rewritten in place when the answer lands: `cargo test` takes a
+  minute, and a frozen screen should not read as a hung one.
+- Colour: green `PASS`, red `FAIL`, yellow `INCOMPLETE`, dim `SKIPPED`. A piped
+  run paints nothing and never writes the live line, and `NO_COLOR` (non-empty)
+  or `TERM=dumb` switch colour off by hand.
+- The banner, the verdict and the failure report are boxed panels. Hashes in a
+  panel are shortened to eight characters so the eye can compare them; the
+  revision stamp under the verdict and the markdown report keep the full ones,
+  because a verdict is bound to the revision it measured.
+- Errors lead with a red `error:` and step their details and hint back to dim;
+  warnings lead with a yellow `warning:`. `--list-targets` prints an aligned
+  `NAME PATH KIND` table.
+
 ## Install
 
 With Nix (the dev shell brings every gate tool along):
@@ -149,8 +197,9 @@ the merge-base diff plus staged and untracked files.
 
 With the default `auto` target, the ladder measures the narrowest target that
 covers every changed file a target owns. A diff spread over several targets is
-not guessed at — name the targets or pass `--all`. A docs-only diff measures
-nothing and exits 2: nothing changed that a gate can judge.
+not guessed at — name the targets or pass `--all`. A diff no target owns — docs
+that live outside every crate — measures nothing and exits 2, with the changed
+files listed so the reason is visible.
 
 ## Configuration
 
@@ -216,9 +265,34 @@ Notes:
 
 ## Reports
 
-Each run prints the banner (target, base, changed files, revision stamp),
-the per-gate lines, and the verdict. On failure it prints the full failure
-report and writes the markdown report.
+Every measured target closes with the verdict panel and the full revision stamp,
+and the run writes the markdown report (passing or blocked) and prints where it
+landed. A blocked run prints the failure report first — the artifact meant to be
+handed to the next attempt:
+
+```
+╭─ failure ───────────────╮
+│ BLOCKED — size=FAIL     │
+│ target   workspace (./) │
+│ revision febf29d1       │
+│ dirty    b1ab9f36       │
+│ base     origin/master  │
+│ failing  1 of 1 gates   │
+╰─────────────────────────╯
+
+  [2/6] ✗ size — FAIL
+      summary   worst function 74 sloc / cc 1 (oversized_demo)
+      contract  `.guardrails.toml` [size] file_loc.fail=500, function_loc.fail=60, complexity.fail=15, nesting.fail=4
+      evidence
+        - file src/size_demo.rs: 74 code lines (ok)
+        - nesting: not measured (rust-code-analysis exposes no nesting metric for this input)
+        - src/size_demo.rs: oversized_demo has function_loc 74 (fail >= 60)
+      fix
+        - split along a real seam — moving the code into another file does not pass this gate
+```
+
+Each blocked gate carries its position in the ladder, the contract it enforced,
+the evidence, and the fix hints; a gate that passed is not restated.
 
 - `--report PATH` — explicit location; a relative path is resolved against the repo root.
 - Without `--report`, the report goes to `$COMMANDCODE_SCRATCHPAD/guardrails-report.md`
@@ -257,7 +331,8 @@ and the six gates are run against the diff before handoff.
 | `src/targets.rs` | target detection and diff scoping |
 | `src/config/` | `.guardrails.toml` loading, validation and defaults |
 | `src/gates/` | the six gates and their reporting |
-| `src/report.rs` | verdicts, failure report, markdown report |
+| `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report |
+| `src/style.rs` | the styling vocabulary: colour, glyphs, terminal detection |
 | `src/process.rs` | process execution, git queries, `nix develop` fallback |
 | `src/aid.rs` | the nested-worktree workspace aid |
 
