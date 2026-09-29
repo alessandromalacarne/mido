@@ -125,7 +125,8 @@ fn a_run_without_a_gate_selection_uses_all_six() {
         &repo.root,
         Config::load(&repo.root).expect("config"),
         &FakeRunner::default(),
-    );
+    )
+    .expect("session");
 
     assert_eq!(session.gates.len(), GATES.len());
 }
@@ -153,6 +154,7 @@ fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
         repo: repo.root.clone(),
         config,
         base: "HEAD".to_string(),
+        scope: Scope::Diff,
         changed: vec!["lib/src/foo.rs".to_string()],
         revision: "abc".to_string(),
         dirty: "def".to_string(),
@@ -379,6 +381,7 @@ fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
         repo: repo.root.clone(),
         config,
         base: "HEAD".to_string(),
+        scope: Scope::Diff,
         changed: vec!["README.md".to_string()],
         revision: "abc".to_string(),
         dirty: "def".to_string(),
@@ -414,6 +417,7 @@ fn every_target_can_be_selected_with_all() {
         repo: repo.root.clone(),
         config,
         base: "HEAD".to_string(),
+        scope: Scope::Diff,
         changed: vec!["lib/src/foo.rs".to_string()],
         revision: "abc".to_string(),
         dirty: "def".to_string(),
@@ -448,6 +452,7 @@ fn a_pass_verdict_line_matches_the_gate_result() {
         repo: repo.root.clone(),
         config: Config::load(&repo.root).expect("config loads"),
         base: "HEAD".to_string(),
+        scope: Scope::Diff,
         changed: Vec::new(),
         revision: "abc".to_string(),
         dirty: "def".to_string(),
@@ -526,7 +531,8 @@ fn the_session_records_how_the_target_was_chosen() {
         &repo.root,
         config.clone(),
         &runner,
-    );
+    )
+    .expect("session");
     assert_eq!(auto.selection, "auto");
 
     let requested = build_session(
@@ -534,6 +540,7 @@ fn the_session_records_how_the_target_was_chosen() {
         &repo.root,
         config,
         &runner,
-    );
+    )
+    .expect("session");
     assert_eq!(requested.selection, "requested");
 }

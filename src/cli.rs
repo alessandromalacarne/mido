@@ -142,6 +142,17 @@ mod tests {
     }
 
     #[test]
+    fn explicit_paths_and_a_base_revision_are_mutually_exclusive() {
+        let rejected = try_parse_from(&["--path", "src", "--base", "origin/mvp"]);
+
+        assert!(
+            rejected.is_err(),
+            "there is no base to diff a path list against"
+        );
+        assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
+    }
+
+    #[test]
     fn flags_argv() {
         let args = parse_from(&[
             "--repo",

@@ -402,3 +402,26 @@ fn report_records_the_runner_the_config_declares() {
     assert!(report.contains("| tests | PASS | 1 passed |"));
     assert!(report.contains("VERDICT: SHIP-READY"));
 }
+
+#[test]
+fn a_report_without_a_base_names_the_explicit_paths() {
+    let report = render_report_markdown(
+        &[GateResult::new(
+            "tests",
+            PASS,
+            "1 passed",
+            Vec::<String>::new(),
+        )],
+        &ReportContext {
+            target: &Target::workspace_target(),
+            base: "",
+            revision: "fa5bac38",
+            dirty: "abc123",
+            changed: &["lib/src/foo.rs".to_string()],
+            runner: "",
+        },
+    );
+
+    assert!(report.contains("scope: `explicit paths`"), "{report}");
+    assert!(!report.contains("base:"), "{report}");
+}

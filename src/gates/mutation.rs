@@ -290,6 +290,8 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
@@ -311,6 +313,8 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
@@ -331,6 +335,8 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
@@ -352,6 +358,8 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
@@ -369,6 +377,8 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
@@ -443,6 +453,8 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
@@ -467,11 +479,18 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
         assert!(result.contract.contains("--in-place"));
         assert!(!result.contract.contains("--in-diff"));
+        assert!(
+            !result.contract.contains("--file"),
+            "`all` scopes nothing: no path may ride along: {}",
+            result.contract
+        );
     }
 
     #[test]
@@ -484,9 +503,64 @@ mod tests {
             &repo.root,
             &Target::workspace_target(),
             &config_for(&repo),
+            &[],
+            Scope::Diff,
             &scratch(&repo),
         );
 
         assert!(result.contract.contains("--timeout 120"));
+    }
+
+    #[test]
+    fn explicit_paths_scope_the_mutants_to_the_named_files() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+        let changed = vec!["src/foo.rs".to_string(), "README.md".to_string()];
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &changed,
+            Scope::Paths,
+            &scratch(&repo),
+        );
+
+        assert!(
+            result.contract.contains("--file src/foo.rs"),
+            "{}",
+            result.contract
+        );
+        assert!(
+            !result.contract.contains("--in-diff"),
+            "{}",
+            result.contract
+        );
+        assert!(
+            !result.contract.contains("README.md"),
+            "{}",
+            result.contract
+        );
+    }
+
+    #[test]
+    fn explicit_paths_without_a_rust_file_never_run_the_mutants() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+
+        let result = gate_mutation(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(),
+            &config_for(&repo),
+            &["README.md".to_string()],
+            Scope::Paths,
+            &scratch(&repo),
+        );
+
+        assert_eq!(result.status, INCOMPLETE);
+        assert!(result.summary.contains("no rust file in the paths given"));
+        assert!(!runner.called_with("cargo mutants"));
     }
 }

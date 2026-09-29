@@ -10,6 +10,18 @@ fn repo(config: Option<&str>) -> MiniRepo {
     MiniRepo::build(config)
 }
 
+/// The `--path` list, resolved against a repo built for the case.
+fn paths(repo: &MiniRepo, specs: &[PathBuf]) -> Result<Vec<String>, GuardrailsError> {
+    let config = Config::load(&repo.root).expect("config loads");
+    explicit_paths(&repo.root, &config, specs)
+}
+
+fn touch(repo: &MiniRepo, path: &str) {
+    let full = repo.root.join(path);
+    std::fs::create_dir_all(full.parent().expect("parent")).expect("dir");
+    std::fs::write(full, "").expect("file");
+}
+
 #[test]
 fn workspace_members_collapse_into_one_target() {
     let repo = repo(None);
@@ -306,4 +318,83 @@ fn labels_show_the_directory() {
         Target::crate_target("frontend", false).label(),
         "frontend (frontend/)"
     );
+}
+
+#[test]
+fn a_folder_is_walked_into_its_files_in_a_stable_order() {
+    let repo = repo(None);
+    touch(&repo, "lib/src/b.rs");
+    touch(&repo, "lib/src/a.rs");
+    touch(&repo, "lib/src/deep/c.rs");
+
+    let resolved = paths(&repo, &[repo.root.join("lib/src")]).expect("paths resolve");
+
+    assert_eq!(
+        resolved,
+        vec!["lib/src/a.rs", "lib/src/b.rs", "lib/src/deep/c.rs"]
+    );
+}
+
+#[test]
+fn a_file_is_taken_as_it_is_and_a_repeat_collapses() {
+    let repo = repo(None);
+    touch(&repo, "lib/src/foo.rs");
+    let file = repo.root.join("lib/src/foo.rs");
+
+    let resolved = paths(&repo, &[file.clone(), file]).expect("paths resolve");
+
+    assert_eq!(resolved, vec!["lib/src/foo.rs"]);
+}
+
+#[test]
+fn hidden_entries_are_not_walked() {
+    let repo = repo(None);
+    touch(&repo, "lib/src/.hidden/secret.rs");
+    touch(&repo, "lib/src/.dotfile.rs");
+    touch(&repo, "lib/src/foo.rs");
+
+    let resolved = paths(&repo, &[repo.root.join("lib/src")]).expect("paths resolve");
+
+    assert_eq!(resolved, vec!["lib/src/foo.rs"]);
+}
+
+#[test]
+fn a_target_name_resolves_to_its_directory() {
+    let repo = repo(None);
+    touch(&repo, "frontend/src/main.rs");
+
+    let resolved = paths(&repo, &[PathBuf::from("frontend")]).expect("paths resolve");
+
+    assert_eq!(
+        resolved,
+        vec!["frontend/Cargo.toml", "frontend/src/main.rs"]
+    );
+}
+
+#[test]
+fn a_missing_path_is_a_setup_error() {
+    let repo = repo(None);
+
+    let error = paths(&repo, &[PathBuf::from("nope/nothing.rs")])
+        .expect_err("no such path")
+        .render();
+
+    assert!(
+        error.contains("`nope/nothing.rs` does not exist"),
+        "{error}"
+    );
+    assert!(error.contains("hint: pass a file, a folder or a target name"));
+}
+
+#[test]
+fn a_path_outside_the_repo_is_a_setup_error() {
+    let repo = repo(None);
+    let outside = tempfile::tempdir().expect("temp dir");
+    std::fs::write(outside.path().join("elsewhere.rs"), "").expect("file");
+
+    let error = paths(&repo, &[outside.path().join("elsewhere.rs")])
+        .expect_err("outside the repo")
+        .render();
+
+    assert!(error.contains("is outside the repo"), "{error}");
 }
