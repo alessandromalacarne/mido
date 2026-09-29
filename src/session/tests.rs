@@ -312,6 +312,33 @@ fn a_failing_gate_exits_1_with_the_failure_report_on_stdout() {
 }
 
 #[test]
+fn a_gate_that_never_reached_a_verdict_exits_2_instead_of_1() {
+    let repo = MiniRepo::build(None);
+    std::fs::create_dir_all(repo.root.join("lib/src")).expect("member src dir");
+    std::fs::write(
+        repo.root.join("lib/src/foo.rs"),
+        "pub fn foo() -> i64 {\n    1\n}\n",
+    )
+    .expect("changed file");
+    let runner = changed_runner((0, ""));
+
+    let (code, out, err) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "workspace",
+            "--gate",
+            "size",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 2, "INCOMPLETE is not a FAIL: {out}");
+    assert!(out.contains("BLOCKED — size=INCOMPLETE"), "{out}");
+    assert!(err.contains("error: guardrails BLOCKED"), "{err}");
+}
+
+#[test]
 fn a_report_path_is_never_relative_to_the_process_directory() {
     let repo = PathBuf::from("/repo");
 
