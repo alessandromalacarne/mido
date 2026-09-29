@@ -11,7 +11,13 @@ fn drains() -> (Vec<u8>, Vec<u8>) {
 fn run(argv: &[&str], runner: &FakeRunner) -> (i32, String, String) {
     let args = parse_from(argv);
     let (mut out, mut err) = drains();
-    let code = crate::cli::main_with(&args, runner, &mut out, &mut err);
+    let code = crate::cli::main_with(
+        &args,
+        runner,
+        &mut out,
+        &mut err,
+        crate::style::Style::plain(),
+    );
     (
         code,
         String::from_utf8_lossy(&out).to_string(),
@@ -125,6 +131,21 @@ fn a_run_without_a_gate_selection_uses_all_six() {
 }
 
 #[test]
+fn a_target_owning_none_of_the_diff_leaves_nothing_ship_ready() {
+    let repo = MiniRepo::build(None);
+    let runner = changed_runner((0, "test result: ok. 1 passed; 0 failed\n"));
+
+    let (code, out, _) = run(
+        &["--repo", &repo.root.to_string_lossy(), "frontend"],
+        &runner,
+    );
+
+    assert_eq!(code, 2);
+    assert!(out.contains("no gate ran"), "{out}");
+    assert!(out.contains("nothing here is ship-ready"), "{out}");
+}
+
+#[test]
 fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
     let repo = MiniRepo::build(None);
     let config = Config::load(&repo.root).expect("config loads");
@@ -147,6 +168,7 @@ fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
     let mut io = Io {
         out: &mut out,
         err: &mut err,
+        style: crate::style::Style::plain(),
     };
 
     let results = run_target(
@@ -176,12 +198,47 @@ fn targets_are_listed_with_their_kind() {
     let config = Config::load(&repo.root).expect("config loads");
     let mut out = Vec::new();
 
-    print_targets(&mut out, &repo.root, &detect_targets(&repo.root, &config));
+    print_targets(
+        &mut out,
+        &repo.root,
+        &detect_targets(&repo.root, &config),
+        crate::style::Style::plain(),
+    );
 
     let printed = String::from_utf8(out).expect("utf8");
     assert!(printed.contains("targets under"));
     assert!(printed.contains("workspace"));
     assert!(printed.contains("member"));
+}
+
+#[test]
+fn the_target_table_aligns_on_its_widest_name() {
+    let targets = BTreeMap::from([
+        (
+            "a-very-long-target-name".to_string(),
+            Target::crate_target("a-very-long-target-name", false),
+        ),
+        ("api".to_string(), Target::crate_target("api", false)),
+    ]);
+    let mut out = Vec::new();
+
+    print_targets(
+        &mut out,
+        Path::new("/repo"),
+        &targets,
+        crate::style::Style::plain(),
+    );
+
+    let printed = String::from_utf8(out).expect("utf8");
+    let rows: Vec<&str> = printed.lines().collect();
+    assert_eq!(rows[0], "targets under /repo:");
+    assert!(rows[2].starts_with("  NAME"));
+    let path_column = rows[2]
+        .find("PATH")
+        .expect("the header names the path column");
+    assert!(rows[3][path_column..].starts_with("a-very-long-target-name"));
+    assert!(rows[4][path_column..].starts_with("api"));
+    assert!(rows[3].ends_with("standalone crate"));
 }
 
 #[test]
@@ -212,7 +269,7 @@ fn a_passing_run_writes_the_report_and_says_so() {
     );
 
     assert_eq!(code, 0);
-    assert!(out.contains("verdict: SHIP-READY"));
+    assert!(out.contains("│ SHIP-READY"), "{out}");
     assert!(out.contains("\"verdict\":\"SHIP-READY\""));
     assert!(out.contains("report written to"));
     let markdown = std::fs::read_to_string(&report).expect("report");
@@ -246,8 +303,8 @@ fn a_failing_gate_exits_1_with_the_failure_report_on_stdout() {
     );
 
     assert_eq!(code, 1);
-    assert!(out.contains("FAILURE REPORT"));
-    assert!(out.contains("gate 4/6 — tests — FAIL"));
+    assert!(out.contains("╭─ failure"), "{out}");
+    assert!(out.contains("[4/6] ✗ tests — FAIL"), "{out}");
     assert!(err.contains("error: guardrails BLOCKED"));
     assert!(std::fs::read_to_string(&report)
         .expect("report")
@@ -309,8 +366,14 @@ fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
     let targets = detect_targets(&repo.root, &session.config);
     let mut out = Vec::new();
 
-    let selected = select_targets(&parse_from(&["--repo", "."]), &session, &targets, &mut out)
-        .expect("selection is fine");
+    let selected = select_targets(
+        &parse_from(&["--repo", "."]),
+        &session,
+        &targets,
+        &mut out,
+        crate::style::Style::plain(),
+    )
+    .expect("selection is fine");
 
     assert!(selected.is_none());
     assert!(String::from_utf8_lossy(&out).contains("nothing to measure"));
@@ -337,9 +400,15 @@ fn every_target_can_be_selected_with_all() {
     };
     let targets = detect_targets(&repo.root, &session.config);
 
-    let selected = select_targets(&parse_from(&["--all"]), &session, &targets, &mut Vec::new())
-        .expect("selection is fine")
-        .expect("targets selected");
+    let selected = select_targets(
+        &parse_from(&["--all"]),
+        &session,
+        &targets,
+        &mut Vec::new(),
+        crate::style::Style::plain(),
+    )
+    .expect("selection is fine")
+    .expect("targets selected");
 
     assert!(selected.iter().any(|target| target.name == "workspace"));
     assert!(selected.iter().any(|target| target.name == "frontend"));
@@ -375,11 +444,13 @@ fn a_pass_verdict_line_matches_the_gate_result() {
             "3 passed",
             Vec::<String>::new(),
         )],
+        crate::style::Style::plain(),
     );
 
-    assert!(String::from_utf8(out)
-        .expect("utf8")
-        .contains("verdict: SHIP-READY"));
+    let printed = String::from_utf8(out).expect("utf8");
+    assert!(printed.starts_with("╭─ verdict"), "{printed}");
+    assert!(printed.contains("│ SHIP-READY"), "{printed}");
+    assert!(printed.contains("revision stamp: abc | def"), "{printed}");
 }
 
 #[test]
