@@ -7,9 +7,10 @@ use crate::error::{GateFailure, GuardrailsError, RunError};
 use crate::gates::{run_gates, GateRun};
 use crate::process::{self, Runner};
 use crate::report::{
-    exit_code, render_banner, render_failure, render_report_markdown, verdict, FailureContext,
-    GateResult, ReportContext, GATES, MAX_BANNER_FILES,
+    exit_code, render_banner, render_failure, render_report_markdown, render_verdict, verdict,
+    BannerContext, FailureContext, GateResult, ReportContext, GATES, MAX_BANNER_FILES,
 };
+use crate::style::Style;
 use crate::targets::{detect_targets, pick_auto_target, resolve_target, scope_changed, Target};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -18,6 +19,7 @@ use std::path::{Path, PathBuf};
 pub struct Io<'a> {
     pub out: &'a mut dyn Write,
     pub err: &'a mut dyn Write,
+    pub style: Style,
 }
 
 /// Everything a ladder run measures, resolved once.
@@ -116,22 +118,45 @@ pub fn build_session(args: &Args, repo: &Path, config: Config, runner: &dyn Runn
     }
 }
 
-pub fn print_targets(out: &mut dyn Write, repo: &Path, targets: &BTreeMap<String, Target>) {
+pub fn print_targets(
+    out: &mut dyn Write,
+    repo: &Path,
+    targets: &BTreeMap<String, Target>,
+    style: Style,
+) {
+    let rows: Vec<(String, String, &'static str)> = targets
+        .iter()
+        .map(|(name, target)| {
+            let kind = if target.path.is_empty() {
+                "workspace"
+            } else if target.workspace_member {
+                "member"
+            } else {
+                "standalone crate"
+            };
+            let path = if target.path.is_empty() {
+                "."
+            } else {
+                target.path.as_str()
+            };
+            (name.clone(), path.to_string(), kind)
+        })
+        .collect();
+    let name_width = rows.iter().map(|row| row.0.len()).max().unwrap_or(0).max(4);
+    let path_width = rows.iter().map(|row| row.1.len()).max().unwrap_or(0).max(4);
+
     let _ = writeln!(out, "targets under {}:", repo.display());
-    for (name, target) in targets {
-        let kind = if target.path.is_empty() {
-            "workspace"
-        } else if target.workspace_member {
-            "member"
-        } else {
-            "standalone crate"
-        };
-        let path = if target.path.is_empty() {
-            "."
-        } else {
-            target.path.as_str()
-        };
-        let _ = writeln!(out, "  {name:<12} {path:<16} {kind}");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "{}",
+        style.dim(&format!(
+            "  {:<name_width$} {:<path_width$} KIND",
+            "NAME", "PATH"
+        ))
+    );
+    for (name, path, kind) in rows {
+        let _ = writeln!(out, "  {name:<name_width$} {path:<path_width$} {kind}");
     }
 }
 
@@ -141,25 +166,14 @@ pub fn select_targets(
     session: &Session,
     targets: &BTreeMap<String, Target>,
     out: &mut dyn Write,
+    style: Style,
 ) -> Result<Option<Vec<Target>>, GuardrailsError> {
     // Opening a named target is checked first: a typo is a typo whether or not
     // the tree happens to have changes.
-    let requested = if args.all || args.target == "auto" {
-        None
-    } else {
-        Some(resolve_target(
-            &session.repo,
-            &session.config,
-            &args.target,
-        )?)
-    };
+    let requested = requested_target(args, session)?;
 
     if session.changed.is_empty() {
-        let _ = writeln!(
-            out,
-            "nothing changed against {} — no revision to measure.\nPass --base <sha before the change>, or check out a branch with the work.",
-            session.base
-        );
+        report_nothing_changed(out, session, style);
         return Ok(None);
     }
 
@@ -180,20 +194,51 @@ pub fn select_targets(
     match pick_auto_target(targets, &session.changed)? {
         Some(inferred) => Ok(Some(vec![inferred])),
         None => {
-            let listing: Vec<String> = session
-                .changed
-                .iter()
-                .take(MAX_BANNER_FILES)
-                .map(|path| format!("  {path}"))
-                .collect();
-            let _ = writeln!(
-                out,
-                "nothing to measure: no changed file belongs to a cargo target.\n{}\nName a target explicitly (--list-targets) if the ladder should run anyway.",
-                listing.join("\n")
-            );
+            report_nothing_to_measure(out, session, style);
             Ok(None)
         }
     }
+}
+
+/// The target named on the command line, if one was named.
+fn requested_target(args: &Args, session: &Session) -> Result<Option<Target>, GuardrailsError> {
+    if args.all || args.target == "auto" {
+        return Ok(None);
+    }
+    Ok(Some(resolve_target(
+        &session.repo,
+        &session.config,
+        &args.target,
+    )?))
+}
+
+/// Nobody can measure a revision that is not there.
+fn report_nothing_changed(out: &mut dyn Write, session: &Session, style: Style) {
+    let _ = writeln!(
+        out,
+        "nothing changed against {} — no revision to measure.",
+        session.base
+    );
+    let _ = writeln!(
+        out,
+        "{}",
+        style.dim("Pass --base <sha before the change>, or check out a branch with the work.")
+    );
+}
+
+/// No changed file belongs to a cargo target — with the list to prove it.
+fn report_nothing_to_measure(out: &mut dyn Write, session: &Session, style: Style) {
+    let listing: Vec<String> = session
+        .changed
+        .iter()
+        .take(MAX_BANNER_FILES)
+        .map(|path| style.dim(&format!("  {path}")))
+        .collect();
+    let _ = writeln!(
+        out,
+        "nothing to measure: no changed file belongs to a cargo target.\n{}\nName a target explicitly (--list-targets) if the ladder should run anyway.",
+        listing.join("\n")
+    );
 }
 
 pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult]) -> String {
@@ -215,13 +260,17 @@ pub fn print_verdict(
     session: &Session,
     target: &Target,
     results: &[GateResult],
+    style: Style,
 ) {
     let final_verdict = verdict(results);
-    let _ = writeln!(out, "verdict: {final_verdict}");
+    let _ = writeln!(out, "{}", render_verdict(&final_verdict, style));
     let _ = writeln!(
         out,
-        "revision stamp: {} | {}",
-        session.revision, session.dirty
+        "{}",
+        style.dim(&format!(
+            "revision stamp: {} | {}",
+            session.revision, session.dirty
+        ))
     );
     if !session.as_json {
         return;
@@ -263,12 +312,15 @@ pub fn run_target(
         "{}",
         render_banner(
             target,
-            &session.base,
-            &session.revision,
-            &session.dirty,
-            &scoped,
-            &session.selection,
-            session.config.script().as_deref().unwrap_or_default(),
+            &BannerContext {
+                base: &session.base,
+                revision: &session.revision,
+                dirty: &session.dirty,
+                changed: &scoped,
+                selected_how: &session.selection,
+                runner: session.config.script().as_deref().unwrap_or_default(),
+            },
+            io.style,
         )
     );
     let _ = writeln!(io.out);
@@ -276,8 +328,11 @@ pub fn run_target(
     if scoped.is_empty() {
         let _ = writeln!(
             io.out,
-            "no changed file belongs to {} — skipping.\n",
-            target.label()
+            "{}\n",
+            io.style.dim(&format!(
+                "no changed file belongs to {} — skipping.",
+                target.label()
+            ))
         );
         return Ok(None);
     }
@@ -296,11 +351,17 @@ pub fn run_target(
             baseline_lcov: session.baseline_lcov.as_deref(),
         },
         io.out,
+        io.style,
     );
     Ok(Some(results))
 }
 
-pub fn write_report(report_path: Option<&Path>, reports: &[String], out: &mut dyn Write) {
+pub fn write_report(
+    report_path: Option<&Path>,
+    reports: &[String],
+    out: &mut dyn Write,
+    style: Style,
+) {
     let Some(report_path) = report_path else {
         return;
     };
@@ -308,7 +369,11 @@ pub fn write_report(report_path: Option<&Path>, reports: &[String], out: &mut dy
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(report_path, reports.join("\n"));
-    let _ = writeln!(out, "report written to {}", report_path.display());
+    let _ = writeln!(
+        out,
+        "{}",
+        style.dim(&format!("report written to {}", report_path.display()))
+    );
 }
 
 /// Print the detailed failure, persist the evidence, then block the run.
@@ -336,10 +401,11 @@ fn raise_blocked(
             base: &session.base,
             attempts,
         },
+        io.style,
     );
 
     let _ = writeln!(io.out, "{failure}");
-    write_report(session.report_path.as_deref(), reports, io.out);
+    write_report(session.report_path.as_deref(), reports, io.out, io.style);
     RunError::Failure(GateFailure::new(failure, final_verdict))
 }
 
@@ -353,53 +419,79 @@ pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<
     let config = Config::load(&repo)?;
 
     for warning in config.warnings() {
-        let _ = writeln!(io.err, "warning: {warning}");
+        let _ = writeln!(io.err, "{} {warning}", io.style.warn("warning:"));
     }
 
     let targets = detect_targets(&repo, &config);
     if args.list_targets {
-        print_targets(io.out, &repo, &targets);
+        print_targets(io.out, &repo, &targets, io.style);
         return Ok(0);
     }
     if targets.is_empty() {
-        return Err(RunError::Error(
-            GuardrailsError::setup(format!("no cargo target found under {}", repo.display()))
-                .hint("the ladder measures cargo targets; run it from the repo root"),
-        ));
+        return Err(no_targets_error(&repo));
     }
 
     let session = build_session(args, &repo, config, runner);
-    let Some(selected) = select_targets(args, &session, &targets, io.out)? else {
+    let Some(selected) = select_targets(args, &session, &targets, io.out, io.style)? else {
         return Ok(2);
     };
 
+    let (measured, reports) = measure(runner, &session, &selected, io)?;
+    if !measured {
+        report_no_gates(io);
+        return Ok(2);
+    }
+
+    write_report(session.report_path.as_deref(), &reports, io.out, io.style);
+    Ok(0)
+}
+
+/// Every selected target, in turn; the first blocked one ends the run.
+fn measure(
+    runner: &dyn Runner,
+    session: &Session,
+    selected: &[Target],
+    io: &mut Io<'_>,
+) -> Result<(bool, Vec<String>), RunError> {
     let mut reports: Vec<String> = Vec::new();
     let mut measured = false;
 
-    for target in &selected {
-        let Some(results) = run_target(runner, &session, target, io)? else {
+    for target in selected {
+        let Some(results) = run_target(runner, session, target, io)? else {
             continue;
         };
 
         measured = true;
-        print_verdict(io.out, &session, target, &results);
-        reports.push(markdown_report(&session, target, &results));
+        print_verdict(io.out, session, target, &results, io.style);
+        reports.push(markdown_report(session, target, &results));
 
         if exit_code(&results) != 0 {
-            return Err(raise_blocked(&session, target, &results, &reports, io));
+            return Err(raise_blocked(session, target, &results, &reports, io));
         }
     }
 
-    if !measured {
-        let _ = writeln!(
-            io.out,
-            "no gate ran: no changed file belongs to any of the selected target(s).\nA gate that did not run is not a gate that passed — nothing here is ship-ready."
-        );
-        return Ok(2);
-    }
+    Ok((measured, reports))
+}
 
-    write_report(session.report_path.as_deref(), &reports, io.out);
-    Ok(0)
+/// Nothing ran, so nothing passed: exit 2, never a verdict.
+fn report_no_gates(io: &mut Io<'_>) {
+    let _ = writeln!(
+        io.out,
+        "no gate ran: no changed file belongs to any of the selected target(s)."
+    );
+    let _ = writeln!(
+        io.out,
+        "{}",
+        io.style
+            .dim("A gate that did not run is not a gate that passed — nothing here is ship-ready.")
+    );
+}
+
+fn no_targets_error(repo: &Path) -> RunError {
+    RunError::Error(
+        GuardrailsError::setup(format!("no cargo target found under {}", repo.display()))
+            .hint("the ladder measures cargo targets; run it from the repo root"),
+    )
 }
 
 #[cfg(test)]

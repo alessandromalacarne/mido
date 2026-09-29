@@ -1,3 +1,4 @@
+use crate::style::Style;
 use std::fmt;
 
 /// A run that cannot produce a verdict. Rendered as `error: ...` and exit 2.
@@ -51,10 +52,19 @@ impl GuardrailsError {
     }
 
     pub fn render(&self) -> String {
-        let mut lines = vec![format!("error: {}", self.message)];
-        lines.extend(self.details.iter().map(|detail| format!("  {detail}")));
+        self.render_styled(Style::plain())
+    }
+
+    /// `error:` leads in red; the hint steps back, when a terminal is watching.
+    pub fn render_styled(&self, style: Style) -> String {
+        let mut lines = vec![format!("{} {}", style.fail("error:"), self.message)];
+        lines.extend(
+            self.details
+                .iter()
+                .map(|detail| style.dim(&format!("  {detail}"))),
+        );
         if let Some(hint) = &self.hint {
-            lines.push(format!("  hint: {hint}"));
+            lines.push(style.dim(&format!("  hint: {hint}")));
         }
         lines.join("\n")
     }
@@ -155,5 +165,21 @@ mod tests {
         let error = GuardrailsError::setup("boom").detail("why");
 
         assert_eq!(error.to_string(), error.render());
+    }
+
+    #[test]
+    fn a_styled_error_paints_the_lead_in_and_steps_the_hint_back() {
+        let error = GuardrailsError::setup("boom").hint("pass --target frontend");
+
+        let rendered = error.render_styled(Style::colored());
+
+        assert!(
+            rendered.starts_with("\u{1b}[31merror:\u{1b}[0m boom"),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.ends_with("\u{1b}[2m  hint: pass --target frontend\u{1b}[0m"),
+            "{rendered:?}"
+        );
     }
 }

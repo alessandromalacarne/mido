@@ -3,6 +3,7 @@
 use crate::error::RunError;
 use crate::process::Runner;
 use crate::session::{run_session, Io};
+use crate::style::Style;
 use clap::{Parser, ValueEnum};
 use std::io::Write;
 use std::path::PathBuf;
@@ -99,16 +100,22 @@ pub fn main_with(
     runner: &dyn Runner,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    style: Style,
 ) -> i32 {
-    let mut io = Io { out, err };
+    let mut io = Io { out, err, style };
     match run_session(args, runner, &mut io) {
         Ok(code) => code,
         Err(RunError::Error(error)) => {
-            let _ = writeln!(io.err, "{}", error.render());
+            let _ = writeln!(io.err, "{}", error.render_styled(io.style));
             error.exit_code()
         }
         Err(RunError::Failure(failure)) => {
-            let _ = writeln!(io.err, "error: guardrails {}", failure.verdict);
+            let _ = writeln!(
+                io.err,
+                "{} guardrails {}",
+                io.style.fail("error:"),
+                failure.verdict
+            );
             failure.exit_code()
         }
     }
