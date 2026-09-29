@@ -11,7 +11,9 @@ use crate::report::{
     BannerContext, FailureContext, GateResult, ReportContext, GATES, MAX_BANNER_FILES,
 };
 use crate::style::Style;
-use crate::targets::{detect_targets, pick_auto_target, resolve_target, scope_changed, Target};
+use crate::targets::{
+    detect_targets, explicit_paths, pick_auto_target, resolve_target, scope_changed, Scope, Target,
+};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -26,6 +28,7 @@ pub struct Io<'a> {
 pub struct Session {
     pub repo: PathBuf,
     pub config: Config,
+    pub scope: Scope,
     pub base: String,
     pub changed: Vec<String>,
     pub revision: String,
@@ -82,16 +85,34 @@ pub fn report_path(explicit: Option<PathBuf>, repo: &Path) -> Option<PathBuf> {
     }
 }
 
-pub fn build_session(args: &Args, repo: &Path, config: Config, runner: &dyn Runner) -> Session {
-    let base = args
-        .base
-        .clone()
-        .unwrap_or_else(|| process::pick_base(runner, repo));
-    Session {
+pub fn build_session(
+    args: &Args,
+    repo: &Path,
+    config: Config,
+    runner: &dyn Runner,
+) -> Result<Session, GuardrailsError> {
+    // `--path` is the whole scope: no base is picked and no diff is read.
+    let (scope, base, changed) = if args.path.is_empty() {
+        let base = args
+            .base
+            .clone()
+            .unwrap_or_else(|| process::pick_base(runner, repo));
+        let changed = process::changed_files(runner, repo, &base);
+        (Scope::Diff, base, changed)
+    } else {
+        (
+            Scope::Paths,
+            String::new(),
+            explicit_paths(repo, &config, &args.path)?,
+        )
+    };
+
+    Ok(Session {
         repo: repo.to_path_buf(),
         config,
-        base: base.clone(),
-        changed: process::changed_files(runner, repo, &base),
+        scope,
+        base,
+        changed,
         revision: process::git(runner, repo, &["rev-parse", "HEAD"])
             .trim()
             .to_string(),
@@ -115,7 +136,7 @@ pub fn build_session(args: &Args, repo: &Path, config: Config, runner: &dyn Runn
             "requested"
         }
         .to_string(),
-    }
+    })
 }
 
 pub fn print_targets(
@@ -214,6 +235,16 @@ fn requested_target(args: &Args, session: &Session) -> Result<Option<Target>, Gu
 
 /// Nobody can measure a revision that is not there.
 fn report_nothing_changed(out: &mut dyn Write, session: &Session, style: Style) {
+    if session.scope == Scope::Paths {
+        let _ = writeln!(out, "nothing to measure: the paths given hold no file.\n");
+        let _ = writeln!(
+            out,
+            "{}",
+            style.dim("Pass a file, a folder with files in it, or a target name (--list-targets).")
+        );
+        return;
+    }
+
     let _ = writeln!(
         out,
         "nothing changed against {} — no revision to measure.",
@@ -345,6 +376,7 @@ pub fn run_target(
             repo: &session.repo,
             target,
             config: &session.config,
+            scope: session.scope,
             changed: &scoped,
             gates: &session.gates,
             scratch: &session.scratch,
@@ -433,7 +465,7 @@ pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<
         return Err(no_targets_error(&repo));
     }
 
-    let session = build_session(args, &repo, config, runner);
+    let session = build_session(args, &repo, config, runner)?;
     let Some(selected) = select_targets(args, &session, &targets, io.out, io.style)? else {
         return Ok(2);
     };

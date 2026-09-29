@@ -29,6 +29,10 @@ pub struct Args {
     #[arg(long)]
     pub base: Option<String>,
 
+    /// measure these files, folders or target names instead of the diff (repeatable)
+    #[arg(long = "path", value_name = "PATH", conflicts_with = "base")]
+    pub path: Vec<PathBuf>,
+
     /// run only this gate (repeatable)
     #[arg(long = "gate")]
     pub gates: Vec<Gate>,

@@ -228,7 +228,11 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
         .count();
     let mut rows = vec![
         field("target", &named),
-        field("base", context.base),
+        if context.base.is_empty() {
+            field("scope", "explicit paths")
+        } else {
+            field("base", context.base)
+        },
         field("revision", short(or_unknown(context.revision))),
         field("dirty", short(or_unknown(context.dirty))),
         field(
@@ -413,7 +417,11 @@ pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_
         format!("VERDICT: {}", verdict(results)),
         format!("revision: `{}`", context.revision),
         format!("dirty state hash: `{}`", context.dirty),
-        format!("base: `{}`", context.base),
+        if context.base.is_empty() {
+            "scope: `explicit paths`".to_string()
+        } else {
+            format!("base: `{}`", context.base)
+        },
         format!("target: `{}`", context.target.label()),
     ];
     if !context.runner.is_empty() {

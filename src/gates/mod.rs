@@ -13,7 +13,7 @@ use crate::metrics::Unit;
 use crate::process::Runner;
 use crate::report::{gate_line, gate_progress_line, GateResult, SKIPPED};
 use crate::style::Style;
-use crate::targets::Target;
+use crate::targets::{Scope, Target};
 use std::io::Write;
 use std::path::Path;
 
@@ -47,6 +47,7 @@ pub struct GateRun<'a> {
     pub repo: &'a Path,
     pub target: &'a Target,
     pub config: &'a Config,
+    pub scope: Scope,
     pub changed: &'a [String],
     pub gates: &'a [String],
     pub scratch: &'a Path,
@@ -111,6 +112,7 @@ fn run_one(
         repo,
         target,
         config,
+        scope,
         changed,
         scratch,
         baseline_lcov,
@@ -141,7 +143,7 @@ fn run_one(
             baseline_lcov,
             scratch,
         ),
-        _ => mutation::gate_mutation(runner, repo, target, config, scratch),
+        _ => mutation::gate_mutation(runner, repo, target, config, changed, scope, scratch),
     }
 }
 

@@ -62,6 +62,13 @@ impl Target {
     }
 }
 
+/// Where the paths a run measures came from: the diff, or the `--path` given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Diff,
+    Paths,
+}
+
 /// `(members, excluded)` from the root manifest; empty when there is none.
 pub fn workspace_layout(repo: &Path) -> (Vec<String>, Vec<String>) {
     let manifest = repo.join("Cargo.toml");
@@ -219,7 +226,7 @@ pub fn resolve_target(repo: &Path, config: &Config, spec: &str) -> Result<Target
         return Ok(target.clone());
     }
 
-    let candidate = canonical_candidate(repo, spec);
+    let candidate = canonical_candidate(repo, Path::new(spec));
     if !candidate.exists() {
         return Err(unknown_target_error(repo, spec, &targets));
     }
@@ -248,12 +255,11 @@ pub fn resolve_target(repo: &Path, config: &Config, spec: &str) -> Result<Target
     })
 }
 
-fn canonical_candidate(repo: &Path, spec: &str) -> PathBuf {
-    let requested = Path::new(spec);
-    let requested = if requested.is_absolute() {
-        requested.to_path_buf()
+fn canonical_candidate(repo: &Path, spec: &Path) -> PathBuf {
+    let requested = if spec.is_absolute() {
+        spec.to_path_buf()
     } else {
-        repo.join(requested)
+        repo.join(spec)
     };
     std::fs::canonicalize(&requested).unwrap_or(requested)
 }
@@ -290,6 +296,91 @@ fn no_manifest_error(spec: &str, candidate: &Path) -> GuardrailsError {
             candidate.join("Cargo.toml").display()
         ))
         .hint("the ladder measures a cargo target; point it at a crate directory")
+}
+
+/// The files the run was pointed at: a target name resolves to its directory,
+/// a folder is walked, a file is taken as it is. No diff is consulted.
+pub fn explicit_paths(
+    repo: &Path,
+    config: &Config,
+    specs: &[PathBuf],
+) -> Result<Vec<String>, GuardrailsError> {
+    let root = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let targets = detect_targets(&root, config);
+    let mut files: Vec<PathBuf> = Vec::new();
+
+    for spec in specs {
+        let named = targets.get(spec.to_string_lossy().as_ref());
+        let path = match named {
+            Some(target) => target.dir(&root),
+            None => canonical_candidate(&root, spec),
+        };
+        if !path.exists() {
+            return Err(unknown_path_error(&root, spec, &targets));
+        }
+        if path.is_dir() {
+            walk_files(&path, &mut files);
+        } else {
+            files.push(path);
+        }
+    }
+
+    let mut relative: Vec<String> = Vec::new();
+    for file in files {
+        let file = std::fs::canonicalize(&file).unwrap_or(file);
+        let Ok(stripped) = file.strip_prefix(&root) else {
+            return Err(outside_repo_error(&file, &root));
+        };
+        relative.push(stripped.to_string_lossy().replace('\\', "/"));
+    }
+    relative.sort();
+    relative.dedup();
+    Ok(relative)
+}
+
+/// Every file under `directory`, in a stable order; hidden entries are skipped.
+fn walk_files(directory: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut children: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| !is_hidden(path))
+        .collect();
+    children.sort();
+
+    for child in children {
+        if child.is_dir() {
+            walk_files(&child, files);
+        } else {
+            files.push(child);
+        }
+    }
+}
+
+fn is_hidden(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+}
+
+fn unknown_path_error(
+    repo: &Path,
+    spec: &Path,
+    targets: &BTreeMap<String, Target>,
+) -> GuardrailsError {
+    GuardrailsError::setup(format!("`{}` does not exist", spec.display()))
+        .detail(format!("looked under {}", repo.display()))
+        .detail(format!(
+            "known targets: {}",
+            targets.keys().cloned().collect::<Vec<_>>().join(", ")
+        ))
+        .hint("pass a file, a folder or a target name (--list-targets)")
+}
+
+fn outside_repo_error(file: &Path, repo: &Path) -> GuardrailsError {
+    GuardrailsError::setup(format!("`{}` is outside the repo", file.display()))
+        .detail(format!("--path measures files under {}", repo.display()))
 }
 
 pub fn covers(path: &str, target: &Target) -> bool {

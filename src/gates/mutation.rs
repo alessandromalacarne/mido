@@ -6,7 +6,7 @@ use crate::metrics::percent;
 use crate::process::last_lines;
 use crate::process::{self, Command, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
-use crate::targets::{covers, Target};
+use crate::targets::{covers, Scope, Target};
 use regex::Regex;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -98,16 +98,30 @@ pub fn gate_mutation(
     repo: &Path,
     target: &Target,
     config: &Config,
+    changed: &[String],
+    scope: Scope,
     scratch: &Path,
 ) -> GateResult {
     let minimum = config.float("mutation", "kill_rate_min", 70.0, Some(&target.name));
     let timeout = config.int("mutation", "timeout_secs", 3600, Some(&target.name));
-    let scope = config.text_setting("mutation", "scope", "changed", Some(&target.name));
+    let configured = config.text_setting("mutation", "scope", "changed", Some(&target.name));
+    let mutable: Vec<String> = changed
+        .iter()
+        .filter(|path| path.ends_with(RUST_EXT))
+        .cloned()
+        .collect();
+
+    // A run pointed at paths has no diff to patch, so the files themselves are
+    // the scope. Nothing mutable is nothing to measure — never a pass.
+    if scope == Scope::Paths && mutable.is_empty() {
+        return nothing_mutable(config);
+    }
+
     let mut args = config
         .argv("mutation", "command", target)
         .unwrap_or_else(|| vec!["cargo".to_string(), "mutants".to_string()]);
     let patch = scratch.join(format!("guardrails-changed-{}.patch", target.name));
-    match scope_args(runner, repo, target, &scope, &patch) {
+    match scope_args(runner, repo, target, &configured, scope, &mutable, &patch) {
         Ok(scoped) => args.extend(scoped),
         Err(error) => {
             return GateResult::new(
@@ -123,7 +137,7 @@ pub fn gate_mutation(
     args.push("--timeout".to_string());
     args.push(DEFAULT_MUTANT_TIMEOUT.to_string());
     let contract = format!(
-        "{} [mutation] kill_rate_min={minimum}, scope={scope} via `{}`",
+        "{} [mutation] kill_rate_min={minimum}, scope={configured} via `{}`",
         config.source(),
         args.join(" ")
     );
@@ -137,25 +151,54 @@ pub fn gate_mutation(
     judge_mutation(&result, &contract, minimum, timeout)
 }
 
-/// `cargo mutants` in place, either against the changed-file patch or a named path.
+/// The verdict for a path scope with nothing cargo-mutants can mutate.
+fn nothing_mutable(config: &Config) -> GateResult {
+    GateResult::new(
+        "mutation",
+        INCOMPLETE,
+        "no rust file in the paths given — nothing to mutate",
+        ["cargo-mutants mutates rust files; the paths given hold none".to_string()],
+    )
+    .contract(format!(
+        "{} [mutation] scope=explicit paths, no rust file to mutate",
+        config.source()
+    ))
+    .fixes(fix_hints("mutation").iter().copied())
+}
+
+/// `cargo mutants` in place, scoped by the config setting: a named path, or the
+/// changed files — a diff patch when there is a diff, the files themselves when
+/// the run was pointed at `--path`.
 fn scope_args(
     runner: &dyn Runner,
     repo: &Path,
     target: &Target,
-    scope: &str,
+    configured: &str,
+    scope: Scope,
+    changed: &[String],
     patch: &Path,
 ) -> Result<Vec<String>, std::io::Error> {
-    if scope == "changed" {
-        return changed_scope_args(runner, repo, target, patch);
+    if configured != "changed" {
+        if configured.is_empty() || configured == "all" {
+            return Ok(vec!["--in-place".to_string()]);
+        }
+        return Ok(vec![
+            "--in-place".to_string(),
+            "--file".to_string(),
+            configured.to_string(),
+        ]);
     }
-    if scope.is_empty() || scope == "all" {
-        return Ok(vec!["--in-place".to_string()]);
+
+    if scope == Scope::Paths {
+        let mut args = vec!["--in-place".to_string()];
+        for path in changed {
+            args.push("--file".to_string());
+            args.push(path.clone());
+        }
+        return Ok(args);
     }
-    Ok(vec![
-        "--in-place".to_string(),
-        "--file".to_string(),
-        scope.to_string(),
-    ])
+
+    changed_scope_args(runner, repo, target, patch)
 }
 
 fn judge_mutation(
