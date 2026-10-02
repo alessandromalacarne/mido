@@ -65,7 +65,7 @@ pub fn target_keys() -> BTreeSet<&'static str> {
     keys
 }
 
-/// Key names as they appear in `.guardrails.toml` for a nested table value.
+/// Key names as they appear in `.mido.toml` for a nested table value.
 pub fn joined(keys: impl IntoIterator<Item = &'static str>) -> String {
     keys.into_iter().collect::<Vec<_>>().join(", ")
 }

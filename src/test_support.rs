@@ -104,7 +104,7 @@ impl MiniRepo {
         std::fs::create_dir_all(root.join("scripts")).expect("scripts dir");
 
         if let Some(config) = config {
-            std::fs::write(root.join(".guardrails.toml"), dedent(config)).expect("config");
+            std::fs::write(root.join(".mido.toml"), dedent(config)).expect("config");
         }
         Self { root, _tmp: tmp }
     }

@@ -1,4 +1,4 @@
-//! `.guardrails.toml` is the tool contract.
+//! `.mido.toml` is the tool contract.
 
 pub mod keys;
 pub mod text;
@@ -48,7 +48,7 @@ pub struct Config {
 
 impl Config {
     pub fn load(repo: &Path) -> Result<Self, GuardrailsError> {
-        let path = repo.join(".guardrails.toml");
+        let path = repo.join(".mido.toml");
         if !path.exists() {
             return Ok(Self {
                 path: None,
@@ -106,7 +106,7 @@ impl Config {
         }
     }
 
-    /// The runner `.guardrails.toml` declares, if it declares one.
+    /// The runner `.mido.toml` declares, if it declares one.
     pub fn script(&self) -> Option<String> {
         self.data
             .get("script")

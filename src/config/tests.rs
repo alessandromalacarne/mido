@@ -30,7 +30,7 @@ fn repo_config_declares_every_gate() {
     for gate in keys::GATES {
         assert!(
             config.data().contains_key(gate),
-            ".guardrails.toml has no [{gate}] section"
+            ".mido.toml has no [{gate}] section"
         );
     }
 }
@@ -342,10 +342,7 @@ fn an_unparseable_config_is_an_error() {
 fn source_names_the_config_file() {
     let repo = repo("version = 1\n");
 
-    assert_eq!(
-        load(&repo).expect("config loads").source(),
-        "`.guardrails.toml`"
-    );
+    assert_eq!(load(&repo).expect("config loads").source(), "`.mido.toml`");
 }
 
 #[test]

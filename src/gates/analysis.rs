@@ -124,7 +124,7 @@ fn unsupported_tool(
             INCOMPLETE,
             format!("tool `{tool}` is not supported by this runner"),
             [format!(
-                "`.guardrails.toml` names `{tool}`; this script only drives rust-code-analysis-cli"
+                "`.mido.toml` names `{tool}`; this script only drives rust-code-analysis-cli"
             )],
         )
         .contract(contract)

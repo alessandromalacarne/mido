@@ -18,7 +18,7 @@ impl GuardrailsError {
         }
     }
 
-    /// `.guardrails.toml` is unusable — a typo must not silently disable a gate.
+    /// `.mido.toml` is unusable — a typo must not silently disable a gate.
     pub fn config(message: impl Into<String>) -> Self {
         Self::new(message)
     }
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn config_error_renders_the_offending_line() {
-        let error = GuardrailsError::config("`.guardrails.toml` is not valid")
+        let error = GuardrailsError::config("`.mido.toml` is not valid")
             .detail("line 5: unknown key `min_mi` in [analysis]");
 
         assert!(error.render().contains("line 5"));
