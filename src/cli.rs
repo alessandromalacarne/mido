@@ -12,8 +12,8 @@ use std::path::PathBuf;
 #[command(
     name = "mido",
     version,
-    about = "Run the guardrails ladder (`.guardrails.toml`) against one target of the repo.",
-    long_about = "Run the guardrails ladder (`.guardrails.toml`) against one target of the repo.\n\n\
+    about = "Run the guardrails ladder (`.mido.toml`) against one target of the repo.",
+    long_about = "Run the guardrails ladder (`.mido.toml`) against one target of the repo.\n\n\
                   Exit codes: 0 SHIP-READY, 1 BLOCKED, 2 INCOMPLETE."
 )]
 pub struct Args {

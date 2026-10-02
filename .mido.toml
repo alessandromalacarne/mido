@@ -1,4 +1,4 @@
-# .guardrails.toml — guardrails gate configuration
+# .mido.toml — guardrails gate configuration
 version = 1
 script = "src/main.rs"
 

@@ -3,7 +3,7 @@ use super::*;
 fn results() -> Vec<GateResult> {
     vec![
         GateResult::new("syntax", PASS, "clean", Vec::<String>::new())
-            .contract("`.guardrails.toml` [syntax] fmt/lint/typecheck"),
+            .contract("`.mido.toml` [syntax] fmt/lint/typecheck"),
         GateResult::new(
             "size",
             FAIL,
@@ -15,10 +15,10 @@ fn results() -> Vec<GateResult> {
                     .to_string(),
             ],
         )
-        .contract("`.guardrails.toml` [size] file_loc.fail = 500")
+        .contract("`.mido.toml` [size] file_loc.fail = 500")
         .fixes(["split `create_task` along a real seam"]),
         GateResult::new("tests", PASS, "412 passed, 0 failed", Vec::<String>::new())
-            .contract("`.guardrails.toml` [tests] command"),
+            .contract("`.mido.toml` [tests] command"),
     ]
 }
 
@@ -104,7 +104,7 @@ fn failure_report_gives_contract_evidence_and_fix() {
     assert!(report.contains("│ failing  1 of 3 gates"), "{report}");
     assert!(report.contains("[2/6] ✗ size — FAIL"), "{report}");
     assert!(
-        report.contains("`.guardrails.toml` [size] file_loc.fail = 500"),
+        report.contains("`.mido.toml` [size] file_loc.fail = 500"),
         "{report}"
     );
     assert!(
@@ -376,7 +376,7 @@ fn the_report_spells_out_the_fix_for_a_failing_gate() {
     assert!(report.contains("fix:"));
     assert!(report.contains("- split `create_task` along a real seam"));
     assert!(report.contains("| size | FAIL | 2 functions over the ceiling |"));
-    assert!(report.contains("contract: `.guardrails.toml` [size] file_loc.fail = 500"));
+    assert!(report.contains("contract: `.mido.toml` [size] file_loc.fail = 500"));
 }
 
 #[test]

@@ -5,7 +5,7 @@
 
 Like the Kokiri who won't let you into the forest without proof you're ready,
 `mido` won't let a change through without proof it holds. It runs the six-gate
-verification ladder described by `.guardrails.toml` against one target of the
+verification ladder described by `.mido.toml` against one target of the
 repo, and blocks the way until every gate passes.
 
 ## Built for LLM agents
@@ -21,7 +21,7 @@ mido assumes an LLM wrote the change and an LLM reads the result.
   to be the next agent's prompt.
 - A verdict is bound to the revision it measured (`HEAD` plus a dirty-state
   hash), so a green run from before the last edit cannot be replayed on it.
-- Commands are argv arrays, never shell lines: what `.guardrails.toml` declares
+- Commands are argv arrays, never shell lines: what `.mido.toml` declares
   is exactly what runs. An agent editing the config cannot smuggle a pipeline
   into a gate.
 - Output defaults to where agent sessions already keep their artifacts
@@ -36,7 +36,7 @@ mido is not a linter framework. The ladder is the opinion, and it does not bend.
 
 - Six gates, one order, one vocabulary: `PASS`, `FAIL`, `INCOMPLETE`, `SKIPPED`,
   `SHIP-READY`, `BLOCKED`. No custom gates, no plugins.
-- Thresholds ship with defaults; `.guardrails.toml` can move them, but unknown
+- Thresholds ship with defaults; `.mido.toml` can move them, but unknown
   keys are config errors — the ladder refuses to guess what a typo meant.
 - Waivers have to be written down: `enabled = false` stops a gate from running
   and still reports `SKIPPED`, and a skipped gate is never a pass.
@@ -52,7 +52,7 @@ the floor, in cost order: it compiles and passes the formatter, linter and type
 checker; it is small enough to read; it is tested; the tests cover the new
 lines; and the tests actually assert — mutants die. That is the minimum a
 project built with LLMs should not ship below. Start by copying this repo's
-`.guardrails.toml`, and run `mido` before every handoff.
+`.mido.toml`, and run `mido` before every handoff.
 
 ## What it does
 
@@ -79,7 +79,7 @@ project built with LLMs should not ship below. Start by copying this repo's
 | 5 | `coverage` | changed-file line coverage, total coverage drop vs a baseline | `cargo llvm-cov` (lcov) |
 | 6 | `mutation` | percentage of mutants killed in the changed code | `cargo-mutants` |
 
-Built-in defaults, all overridable in `.guardrails.toml`:
+Built-in defaults, all overridable in `.mido.toml`:
 
 - **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4
 - **analysis** — maintainability index ≥ 20; cognitive complexity ≤ 15
@@ -112,7 +112,7 @@ verdict panel closes it.
 │ revision febf29d1                                   │
 │ dirty    bddc06f7                                   │
 │ changed  1 files (1 rust)                           │
-│ runner   src/main.rs (declared by .guardrails.toml) │
+│ runner   src/main.rs (declared by .mido.toml) │
 ╰─────────────────────────────────────────────────────╯
   src/style.rs
 
@@ -221,7 +221,7 @@ setup error (exit 2).
 - **workspace** — the crate (or workspace root) at the repo root;
 - **member** — each crate listed in the root `[workspace] members`;
 - **standalone crate** — a top-level crate directory excluded from the workspace;
-- **declared** — any `[targets.<name>]` section in `.guardrails.toml`.
+- **declared** — any `[targets.<name>]` section in `.mido.toml`.
 
 With the default `auto` target, the ladder measures the narrowest target that
 covers every changed file a target owns. A diff spread over several targets is
@@ -231,7 +231,7 @@ files listed so the reason is visible.
 
 ## Configuration
 
-`.guardrails.toml` is the tool contract. Example, mirroring this repo's own:
+`.mido.toml` is the tool contract. Example, mirroring this repo's own:
 
 ```toml
 version = 1
@@ -310,7 +310,7 @@ handed to the next attempt:
 
   [2/6] ✗ size — FAIL
       summary   worst function 74 sloc / cc 1 (oversized_demo)
-      contract  `.guardrails.toml` [size] file_loc.fail=500, function_loc.fail=60, complexity.fail=15, nesting.fail=4
+      contract  `.mido.toml` [size] file_loc.fail=500, function_loc.fail=60, complexity.fail=15, nesting.fail=4
       evidence
         - file src/size_demo.rs: 74 code lines (ok)
         - nesting: not measured (rust-code-analysis exposes no nesting metric for this input)
@@ -347,7 +347,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
-`mido` is verified with its own ladder: this repo carries a `.guardrails.toml`
+`mido` is verified with its own ladder: this repo carries a `.mido.toml`
 and the six gates are run against the diff before handoff.
 
 ## Layout
@@ -357,7 +357,7 @@ and the six gates are run against the diff before handoff.
 | `src/cli.rs` | the argv surface and exit codes |
 | `src/session.rs` | one run: what is measured, in what order, what is printed |
 | `src/targets.rs` | target detection, path lists and diff scoping |
-| `src/config/` | `.guardrails.toml` loading, validation and defaults |
+| `src/config/` | `.mido.toml` loading, validation and defaults |
 | `src/gates/` | the six gates and their reporting |
 | `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report |
 | `src/style.rs` | the styling vocabulary: colour, glyphs, terminal detection |

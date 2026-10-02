@@ -285,7 +285,7 @@ mod tests {
             &config_for(&repo),
         );
 
-        assert!(result.contract.contains("`.guardrails.toml` [syntax]"));
+        assert!(result.contract.contains("`.mido.toml` [syntax]"));
         assert!(result.contract.contains("format=`cargo fmt --check`"));
         assert!(result.contract.contains("lint=`cargo clippy"));
         assert_eq!(result.fixes.len(), 2);

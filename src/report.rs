@@ -243,7 +243,7 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
     if !context.runner.is_empty() {
         rows.push(field(
             "runner",
-            &format!("{} (declared by .guardrails.toml)", context.runner),
+            &format!("{} (declared by .mido.toml)", context.runner),
         ));
     }
 
@@ -374,7 +374,7 @@ fn render_gate_block(
     lines.extend(render_list("fix", &result.fixes, ""));
     if let Some(attempts) = context.attempts {
         lines.push(format!(
-            "      attempts  max {attempts} distinct hypotheses per gate (`.guardrails.toml` [failure])"
+            "      attempts  max {attempts} distinct hypotheses per gate (`.mido.toml` [failure])"
         ));
     }
     lines.push(String::new());

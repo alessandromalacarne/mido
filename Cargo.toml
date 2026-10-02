@@ -2,7 +2,7 @@
 name = "mido"
 version = "0.1.0"
 edition = "2021"
-description = "Guardrails runner: the six-gate verification ladder described by .guardrails.toml"
+description = "Guardrails runner: the six-gate verification ladder described by .mido.toml"
 license = "MIT"
 
 [dependencies]

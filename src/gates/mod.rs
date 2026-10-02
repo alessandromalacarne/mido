@@ -123,7 +123,7 @@ fn run_one(
         return GateResult::new(
             gate,
             SKIPPED,
-            "`enabled = false` in .guardrails.toml",
+            "`enabled = false` in .mido.toml",
             ["a skipped gate is not a passed gate — the waiver has to be written down"],
         )
         .contract(format!("{} [{gate}] enabled = false", config.source()));
