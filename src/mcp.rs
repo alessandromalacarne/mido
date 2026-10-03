@@ -209,3 +209,6 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
         "error": { "code": code, "message": message },
     })
 }
+
+#[cfg(test)]
+mod tests;
