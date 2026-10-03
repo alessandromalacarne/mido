@@ -5,7 +5,7 @@ use crate::lang::Lang;
 use crate::process::Runner;
 use crate::session::{run_session, Io};
 use crate::style::Style;
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -15,7 +15,8 @@ use std::path::PathBuf;
     version,
     about = "Run the guardrails ladder (`.mido.toml`) against one target of the repo.",
     long_about = "Run the guardrails ladder (`.mido.toml`) against one target of the repo.\n\n\
-                  Exit codes: 0 SHIP-READY, 1 BLOCKED, 2 INCOMPLETE."
+                  Exit codes: 0 SHIP-READY, 1 BLOCKED, 2 INCOMPLETE.",
+    subcommand_precedence_over_arg = true
 )]
 pub struct Args {
     /// target name or path; default `auto` (inferred from the diff)
@@ -65,6 +66,16 @@ pub struct Args {
     /// print the verdict as json
     #[arg(long)]
     pub json: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+/// What `mido` can be asked to do besides measuring a target.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum Command {
+    /// serve the ladder as MCP tools on stdio, for an LLM agent to call
+    Mcp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -200,5 +211,15 @@ mod tests {
         assert_eq!(args.target, "frontend");
         assert_eq!(args.base.as_deref(), Some("origin/mvp"));
         assert!(args.json && args.all);
+    }
+
+    #[test]
+    fn the_mcp_subcommand_is_recognized() {
+        assert_eq!(parse_from(&["mcp"]).command, Some(Command::Mcp));
+    }
+
+    #[test]
+    fn a_target_that_is_not_a_subcommand_is_still_a_target() {
+        assert_eq!(parse_from(&["frontend"]).target, "frontend");
     }
 }
