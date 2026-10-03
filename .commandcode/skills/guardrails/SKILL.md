@@ -1,6 +1,6 @@
 ---
 name: guardrails
-description: Run the post-implementation verification ladder — syntax guards (format/lint/typecheck), module size limits, static analysis (maintainability index, cognitive complexity), tests, coverage, then mutation testing — in that order, fixing forward and never weakening a check to pass. Tool and threshold selection comes from the project's `.mido.toml`, the contract read by `mido`; when that file declares `script`, the named runner implements the whole ladder (in this repo the runner is `mido` itself), so the runner is invoked instead of driving gates by hand. Mandatory before /walkthrough or /lgtm — those steps refuse to run without a SHIP-READY verdict for the current revision. Use when implementation is done, or the user says "/guardrails", "run guardrails", "verify this change", "is this done", "run the checks", "set up guardrails", or asks whether work is ready to ship.
+description: Run the post-implementation verification ladder — syntax guards (format/lint/typecheck), module size limits, static analysis (maintainability index, cognitive complexity), tests, coverage, then mutation testing — in that order, fixing forward and never weakening a check to pass. Tool and threshold selection comes from the project's `.mido.toml`, the contract read by `mido`; in this repo `mido` implements the whole ladder, so it is invoked instead of driving gates by hand. Mandatory before /walkthrough or /lgtm — those steps refuse to run without a SHIP-READY verdict for the current revision. Use when implementation is done, or the user says "/guardrails", "run guardrails", "verify this change", "is this done", "run the checks", "set up guardrails", or asks whether work is ready to ship.
 argument-hint: "[changed-files-glob] [--gate <name>]"
 ---
 
@@ -64,15 +64,11 @@ User-supplied arguments: `$ARGUMENTS`
    every other source, including your ecosystem instincts and the CI
    workflow:
 
-   - **`script` declared** → the file names the runner that implements the
-     whole ladder. That runner *is* the ladder: run it (see "Declared runner
-     script" below) instead of driving the gates by hand. In this repo
-     `script = "src/main.rs"` names `mido` itself. The gate sections in this
-     skill then describe what the runner must verify, not commands for you
-     to run.
    - **Found** → `mido` runs exactly the commands and thresholds written
      there. Announce them ("syntax gate: `cargo clippy -D warnings`, per
-     `.mido.toml`") and don't second-guess a listed tool.
+     `.mido.toml`") and don't second-guess a listed tool. In this repo
+     `mido` implements the whole ladder: run it (see "Running this repo's
+     ladder" below) instead of driving the gates by hand.
    - **Missing, or silent about a gate you need** → ask the user to add it.
      Don't coin-flip between two plausible runners when a one-line answer
      exists. Draft the block from what the stack needs (schema below), show
@@ -127,7 +123,6 @@ plus the `tooling: inferred` stamp.
 | Element | Meaning |
 | --- | --- |
 | `version = 1` | Required when the file exists. Only changes on a breaking format change; without it the run warns. |
-| `script = "..."` | Top level, above the gate sections: repo-relative path to the runner that implements the ladder (see "Declared runner script"). Present → that runner is the ladder; absent → the gates are driven as described below. The file it points at must exist — a path with nothing behind it is a config error, not a fallback. |
 | `[syntax] [size] [analysis] [tests] [coverage] [mutation]` | One flat section per gate — same names and same order as the ladder, so the file reads top-to-bottom like the run does. |
 | `[targets.<name>]` | Per-target overrides: `path`, `scope`, `manifest`, and gate sections that win over the root ones. |
 | `enabled = false` | Inside any gate section. The gate reports `SKIPPED` — and a skipped gate is not a pass: the run is blocked until the waiver is written down (in the report, not in the config). |
@@ -149,7 +144,6 @@ mutation kill rate ≥ 70%; timeouts syntax 1800s, tests 900s, mutation 3600s;
 ```toml
 # .mido.toml — mido gate configuration
 version = 1
-script  = "src/main.rs"          # optional: the runner this ladder belongs to
 
 [syntax]                         # gate 1 — formatter, linter, type checker (argv arrays)
 format    = ["cargo", "fmt", "--check"]
@@ -203,34 +197,22 @@ Rules for this file:
 - Missing gate key ≠ permission to skip the gate. It means "default, or infer
   and stamp".
 
-## Declared runner script
+## Running this repo's ladder
 
-Some projects implement the whole ladder in a runner and say so in the
-contract:
+This repo verifies itself: `mido` is its own ladder runner, so run it rather
+than driving the gates by hand. The gate sections below describe *what `mido`
+must verify* — they are not commands for you to run manually.
 
-```toml
-script = "src/main.rs"   # top-level key, repo-relative path
-```
-
-When that key is present, the gate sections below describe *what the runner
-must verify* — they are not commands for you to run by hand. The runner reads
-the same `.mido.toml` and derives its own targets, scopes and commands from
-it.
-
-- **Run it from the repo root.** In this repo the declared runner is `mido`
-  itself: `cargo run --release -- <target>` (or the installed `mido` binary),
-  from a `nix develop` shell so the gate tools (tokei, rust-code-analysis,
-  cargo-llvm-cov, cargo-mutants) are on PATH. For another project's script,
-  use its interpreter (`./scripts/guardrails.py`, or
-  `python3 scripts/guardrails.py` when there is no executable bit).
+- **Run it from the repo root** — `cargo run --release -- <target>` (or the
+  installed `mido` binary), from a `nix develop` shell so the gate tools
+  (tokei, rust-code-analysis, cargo-llvm-cov, cargo-mutants) are on PATH.
 - Pass `$ARGUMENTS` through in the runner's own terms — `mido` takes
   `--gate <name>` and `--path <path>` (both repeatable), a target name,
   `--lang <module>` to force a language module (rust is inferred from a root
   `Cargo.toml`), or `--all`. Don't invent flags; its `--help` is the authority
   when unsure.
 - **Its exit code is the verdict**, in this skill's own vocabulary: `0`
-  SHIP-READY, `1` BLOCKED, `2` INCOMPLETE. Read the runner's docs before
-  translating any other convention by hand.
+  SHIP-READY, `1` BLOCKED, `2` INCOMPLETE.
 - **Read the report it writes** — by default
   `$COMMANDCODE_SCRATCHPAD/guardrails-report.md` (`--report PATH` overrides),
   the same handoff artifact this skill requires. If the report is missing the
@@ -241,9 +223,6 @@ it.
   `INCOMPLETE` — never a pass, and never a silent fallback to hand-driving
   the gates. Do not re-run by hand what the runner already ran; its verdict
   stands for the revision it ran on.
-- **`script` points at nothing** → the contract is broken: mido rejects it as
-  a config error, and so must you. Report the broken path and ask. Never pick
-  a different runner on your own.
 
 ## Gate 1 — Syntax guards
 
@@ -580,7 +559,7 @@ Then:
 - **Pre-existing issues found but not touched.**
 - **The report is required, not optional.** It belongs at
   `$COMMANDCODE_SCRATCHPAD/guardrails-report.md` and you give the path — it is
-  the handoff artifact the next step reads. A declared runner usually writes
+  the handoff artifact the next step reads. The ladder runner writes
   it (`mido --report PATH` overrides the location): check the file, complete
   it if incomplete, don't duplicate it. It must contain three things: the
   verdict line, the per-gate table, and the **revision stamp**:
@@ -594,12 +573,11 @@ Then:
   for the exact revision being handed off, with the report on disk as
   evidence.** If that verdict doesn't exist, run the ladder — don't narrate
   around it.
-- `.mido.toml` decides which tool each gate runs — or, when it declares
-  `script`, which runner runs the whole ladder: invoke that runner from the
-  repo root (`cargo run --` in this repo), don't reimplement the ladder by
-  hand around it. Missing file → ask, don't guess. Never create or edit it
-  without the user's say-so, and never touch a threshold to turn RED into
-  GREEN.
+- `.mido.toml` decides which tool each gate runs. In this repo, `mido` runs
+  the whole ladder: invoke it from the repo root (`cargo run --`), don't
+  reimplement the ladder by hand around it. Missing file → ask, don't guess.
+  Never create or edit it without the user's say-so, and never touch a
+  threshold to turn RED into GREEN.
 - A gate that did not run is not a gate that passed.
 - Never weaken a check to make it pass — that is lying to the next reader.
 - Never fix an unrelated pre-existing failure inside this change.
