@@ -26,6 +26,8 @@ mido assumes an LLM wrote the change and an LLM reads the result.
   into a gate.
 - Output defaults to where agent sessions already keep their artifacts
   (`$COMMANDCODE_SCRATCHPAD`), and `--json` turns the verdict machine-readable.
+- Speaks MCP: `mido mcp` serves the ladder as MCP tools on stdio, so an
+  MCP-speaking agent calls it directly instead of shelling out.
 - Rendering is honest about who is watching: piped (or with `NO_COLOR`,
   `TERM=dumb`) the run drops colour and the live status line, so what an agent
   captures is a stable, diffable log of the same panels and gate lines.
@@ -174,6 +176,7 @@ so the dev shell provides the tools; otherwise commands are spawned directly.
 mido [TARGET] [--lang LANG] [--repo PATH] [--base REF] [--path PATH]… [--gate GATE]…
      [--all] [--list-targets] [--apply-workspace-aid] [--baseline-lcov PATH]
      [--report PATH] [--json]
+mido mcp
 ```
 
 ```sh
@@ -189,11 +192,44 @@ mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
 mido --report out.md          # write the markdown report
 mido --baseline-lcov base.info         # coverage delta against a base revision
+mido mcp                      # serve the ladder as MCP tools on stdio
 ```
 
 The base is picked automatically when `--base` is omitted:
 `origin/mvp` → `origin/develop` → `origin/master` → `HEAD`. Changed files are
 the merge-base diff plus staged and untracked files.
+
+## MCP server
+
+`mido mcp` serves the ladder as MCP tools on stdio, so an MCP-speaking agent
+calls it directly instead of shelling out. Point a client at it with:
+
+```json
+{
+  "mcpServers": {
+    "mido": {
+      "command": "mido",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Two tools, each the CLI surface for one job:
+
+- `list_targets` — name, path and kind of every target the repo offers
+  (`mido --list-targets`).
+- `run_ladder` — measures one target. The tool result is the run's report,
+  prefixed with `exit_code`; the tool is marked `isError` when the code is not
+  `0` — `1` BLOCKED (the failure report inside is the handoff), `2` INCOMPLETE
+  or a setup error. `tests` and `mutation` run for as long as the CLI takes.
+
+Every argument maps to a flag of the same name (`target`, `repo`, `base`,
+`paths`, `gates`, `all`, `apply_workspace_aid`, `baseline_lcov`, `report`,
+`json`), so the CLI's rules — `--path` conflicts with `--base`, unknown targets
+are errors — apply unchanged; a typo in an argument name is rejected, not
+dropped. stdout carries protocol messages only; anything the server itself has
+to say goes to stderr.
 
 ## Measuring paths instead of a diff
 
@@ -368,6 +404,7 @@ and the six gates are run against the diff before handoff.
 | Module | Role |
 |--------|------|
 | `src/cli.rs` | the argv surface and exit codes |
+| `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
 | `src/lang/` | language modules: the rust module's embedded defaults, parsers, targets and workspace aid |
 | `src/session.rs` | one run: what is measured, in what order, what is printed |
 | `src/targets.rs` | target scoping, path lists and diff ownership |
