@@ -208,7 +208,6 @@ pub struct BannerContext<'a> {
     pub dirty: &'a str,
     pub changed: &'a [String],
     pub selected_how: &'a str,
-    pub runner: &'a str,
     pub source_label: &'a str,
     pub source_count: usize,
 }
@@ -223,7 +222,7 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
             format!(" [{}]", context.selected_how)
         }
     );
-    let mut rows = vec![
+    let rows = vec![
         field("target", &named),
         if context.base.is_empty() {
             field("scope", "explicit paths")
@@ -242,13 +241,6 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
             ),
         ),
     ];
-    if !context.runner.is_empty() {
-        rows.push(field(
-            "runner",
-            &format!("{} (declared by .mido.toml)", context.runner),
-        ));
-    }
-
     let mut lines: Vec<String> = panel("mido", &rows, style)
         .lines()
         .map(str::to_string)
@@ -404,7 +396,6 @@ pub struct ReportContext<'a> {
     pub revision: &'a str,
     pub dirty: &'a str,
     pub changed: &'a [String],
-    pub runner: &'a str,
     pub source_label: &'a str,
     pub source_count: usize,
 }
@@ -423,9 +414,6 @@ pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_
         },
         format!("target: `{}`", context.target.label()),
     ];
-    if !context.runner.is_empty() {
-        lines.push(format!("runner: `{}`", context.runner));
-    }
     lines.push(format!(
         "changed files: {} ({} {})",
         context.changed.len(),

@@ -206,43 +206,6 @@ fn validate_threshold_table(
     Ok(())
 }
 
-/// `script` names the runner that implements this ladder.
-///
-/// Declared rather than inferred: a value that is not a string, or that points at
-/// a file the repo does not have, is a config error.
-pub fn validate_script_entry(
-    data: &Table,
-    text: &str,
-    config_path: &Path,
-    repo: &Path,
-) -> Result<(), GuardrailsError> {
-    let Some(value) = data.get("script") else {
-        return Ok(());
-    };
-    let at = located(text, "script", None);
-
-    let Value::String(declared) = value else {
-        return Err(
-            GuardrailsError::config(format!("{} is not valid", config_path.display()))
-                .detail(format!(
-                    "{at}`script` must be a repo-relative path, got {}",
-                    value.type_str()
-                ))
-                .hint(r#"write it as script = "scripts/guardrails.py""#),
-        );
-    };
-
-    if !repo.join(declared).exists() {
-        return Err(GuardrailsError::config(format!("{} is not valid", config_path.display()))
-            .detail(format!(
-                "{at}`script` points at `{declared}`, and there is no such file under {}",
-                repo.display()
-            ))
-            .hint("a declared runner that is not there is worse than no declaration — fix the path or drop the key"));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
