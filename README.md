@@ -57,6 +57,11 @@ project built with LLMs should not ship below. Start by copying this repo's
 ## What it does
 
 - Runs the gates in a fixed order: **syntax → size → analysis → tests → coverage → mutation**.
+- Drives one **language module** at a time — inferred from the repo (a root `Cargo.toml`
+  selects `rust`) or forced with `--lang`. The module owns the default commands, the
+  output parsers, target detection, the workspace aid and the embedded baseline
+  contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
+  module recognizes exits 2 and says so.
 - Scopes the run to one **target** — the workspace, a member crate, a standalone
   crate, or one declared in the config. By default the target is inferred from
   the diff; `--path` measures the files, folders or targets you name instead.
@@ -166,7 +171,7 @@ so the dev shell provides the tools; otherwise commands are spawned directly.
 ## Usage
 
 ```
-mido [TARGET] [--repo PATH] [--base REF] [--path PATH]… [--gate GATE]…
+mido [TARGET] [--lang LANG] [--repo PATH] [--base REF] [--path PATH]… [--gate GATE]…
      [--all] [--list-targets] [--apply-workspace-aid] [--baseline-lcov PATH]
      [--report PATH] [--json]
 ```
@@ -174,6 +179,7 @@ mido [TARGET] [--repo PATH] [--base REF] [--path PATH]… [--gate GATE]…
 ```sh
 mido                          # infer the target from the diff
 mido frontend                 # one target, by name or path
+mido --lang rust              # force the language module; default: inferred from the repo
 mido --all                    # every detected target, in turn
 mido --list-targets           # show what can be measured, then exit
 mido --base origin/main       # measure against another base
@@ -231,7 +237,14 @@ files listed so the reason is visible.
 
 ## Configuration
 
-`.mido.toml` is the tool contract. Example, mirroring this repo's own:
+`.mido.toml` is the tool contract. Rust also ships a built-in baseline — the
+same document minus `script`, embedded as `src/lang/rust/defaults.toml` — so a
+cargo project with no config still gets the commands and thresholds below. The
+file overrides the baseline key by key; standalone (excluded) crates never
+inherit root commands and fall back to the module's bare `cargo` commands
+instead.
+
+Example, mirroring this repo's own:
 
 ```toml
 version = 1
@@ -355,14 +368,14 @@ and the six gates are run against the diff before handoff.
 | Module | Role |
 |--------|------|
 | `src/cli.rs` | the argv surface and exit codes |
+| `src/lang/` | language modules: the rust module's embedded defaults, parsers, targets and workspace aid |
 | `src/session.rs` | one run: what is measured, in what order, what is printed |
-| `src/targets.rs` | target detection, path lists and diff scoping |
+| `src/targets.rs` | target scoping, path lists and diff ownership |
 | `src/config/` | `.mido.toml` loading, validation and defaults |
 | `src/gates/` | the six gates and their reporting |
 | `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report |
 | `src/style.rs` | the styling vocabulary: colour, glyphs, terminal detection |
 | `src/process.rs` | process execution, git queries, `nix develop` fallback |
-| `src/aid.rs` | the nested-worktree workspace aid |
 
 ## License
 

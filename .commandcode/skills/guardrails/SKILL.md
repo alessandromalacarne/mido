@@ -77,9 +77,9 @@ User-supplied arguments: `$ARGUMENTS`
      Don't coin-flip between two plausible runners when a one-line answer
      exists. Draft the block from what the stack needs (schema below), show
      it, and write the file only after the user confirms. A missing
-     `.mido.toml` still runs — mido falls back to built-in default
-     thresholds, with a warning — but this skill still asks before creating
-     one. Never invent a `.mido.toml` silently.
+     `.mido.toml` still runs — mido falls back to the language module's
+     built-in baseline (rust ships one), with a warning — but this skill still
+     asks before creating one. Never invent a `.mido.toml` silently.
    - **User unavailable / says "just go"** → proceed on best inference for
      that gate and stamp the report `tooling: inferred (<gate>)`, so the
      verdict is traceable.
@@ -224,8 +224,10 @@ it.
   use its interpreter (`./scripts/guardrails.py`, or
   `python3 scripts/guardrails.py` when there is no executable bit).
 - Pass `$ARGUMENTS` through in the runner's own terms — `mido` takes
-  `--gate <name>` and `--path <path>` (both repeatable), a target name, or
-  `--all`. Don't invent flags; its `--help` is the authority when unsure.
+  `--gate <name>` and `--path <path>` (both repeatable), a target name,
+  `--lang <module>` to force a language module (rust is inferred from a root
+  `Cargo.toml`), or `--all`. Don't invent flags; its `--help` is the authority
+  when unsure.
 - **Its exit code is the verdict**, in this skill's own vocabulary: `0`
   SHIP-READY, `1` BLOCKED, `2` INCOMPLETE. Read the runner's docs before
   translating any other convention by hand.
