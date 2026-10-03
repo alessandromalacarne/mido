@@ -1,7 +1,59 @@
+use crate::config::Config;
+use crate::gates::GateRun;
+use crate::lang::Lang;
 use crate::process::{Command, Outcome, Runner};
+use crate::targets::{Scope, Target};
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+
+/// A `GateRun` for tests: the rust module, diff scope, scratch at the repo root.
+pub fn gate_run<'a>(
+    repo: &'a Path,
+    target: &'a Target,
+    config: &'a Config,
+    changed: &'a [String],
+) -> GateRun<'a> {
+    GateRun {
+        repo,
+        target,
+        config,
+        lang: Lang::Rust,
+        scope: Scope::Diff,
+        changed,
+        gates: &[],
+        scratch: repo,
+        baseline_lcov: None,
+    }
+}
+
+/// Drive the binary's contract in-process: argv in, `(exit code, stdout, stderr)` out.
+pub fn run_cli(argv: &[&str], runner: &FakeRunner) -> (i32, String, String) {
+    let args = crate::cli::parse_from(argv);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = crate::cli::main_with(
+        &args,
+        runner,
+        &mut out,
+        &mut err,
+        crate::style::Style::plain(),
+    );
+    (
+        code,
+        String::from_utf8_lossy(&out).to_string(),
+        String::from_utf8_lossy(&err).to_string(),
+    )
+}
+
+/// A runner whose git answers say "one changed file under lib/".
+pub fn changed_runner(tests: (i32, &str)) -> FakeRunner {
+    FakeRunner::with(&[
+        ("merge-base", 0, "base\n"),
+        ("--name-only", 0, "lib/src/foo.rs\n"),
+        ("hash-object", 0, "dirtyhash\n"),
+        ("cargo test", tests.0, tests.1),
+    ])
+}
 
 /// A `Runner` that answers from a needle table instead of spawning processes.
 #[derive(Default)]

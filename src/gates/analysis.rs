@@ -1,67 +1,31 @@
 //! Gate 3 — maintainability metrics.
 
 use crate::config::Config;
-use crate::gates::fix_hints;
-use crate::metrics::{units_from_document, Unit};
-use crate::process::{self, Runner};
+use crate::gates::{fix_hints, GateRun};
+use crate::lang::Lang;
+use crate::metrics::Unit;
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
 use crate::targets::Target;
-use std::path::Path;
 
-pub fn analysis_tool(config: &Config, target: &Target) -> String {
-    config.text_setting("analysis", "tool", "rust-code-analysis", Some(&target.name))
+pub fn analysis_tool(config: &Config, target: &Target, lang: Lang) -> String {
+    config.text_setting(
+        "analysis",
+        "tool",
+        lang.analysis_supported_tool(),
+        Some(&target.name),
+    )
 }
 
-pub fn analysis_units(
-    runner: &dyn Runner,
-    repo: &Path,
-    target: &Target,
-    files: &[String],
-    on_error: &mut Vec<String>,
-) -> Vec<Unit> {
-    let mut units = Vec::new();
-
-    for path in files {
-        let args: Vec<String> = [
-            "rust-code-analysis-cli",
-            "-m",
-            "--pr",
-            "-O",
-            "json",
-            "-p",
-            path,
-        ]
-        .iter()
-        .map(|arg| arg.to_string())
-        .collect();
-        let result = process::dev(runner, &target.dir(repo), &args, None);
-        if !result.ok() || result.stdout.trim().is_empty() {
-            on_error.push(format!(
-                "{path}: rust-code-analysis could not read it (exit {})",
-                result.code
-            ));
-            continue;
-        }
-
-        match serde_json::from_str(&result.stdout) {
-            Ok(document) => units.extend(units_from_document(path, &document)),
-            Err(error) => on_error.push(format!(
-                "{path}: rust-code-analysis printed no usable json ({error})"
-            )),
-        }
-    }
-    units
-}
-
-pub fn gate_analysis(
-    target: &Target,
-    config: &Config,
-    units: &[Unit],
-    tool_errors: &[String],
-) -> GateResult {
+pub fn gate_analysis(run: &GateRun<'_>, units: &[Unit], tool_errors: &[String]) -> GateResult {
+    let GateRun {
+        target,
+        config,
+        lang,
+        ..
+    } = *run;
     let mi_min = config.float("analysis", "mi_min", 20.0, Some(&target.name));
     let cognitive_max = config.float("analysis", "cognitive_max", 15.0, Some(&target.name));
-    let tool = analysis_tool(config, target);
+    let tool = analysis_tool(config, target, lang);
     let contract = format!(
         "{} [analysis] mi_min={}, cognitive_max={} (tool {tool})",
         config.source(),
@@ -69,7 +33,7 @@ pub fn gate_analysis(
         cognitive_max
     );
 
-    if let Some(result) = unsupported_tool(config, target, &tool, &contract) {
+    if let Some(result) = unsupported_tool(config, target, &tool, &contract, lang) {
         return result;
     }
 
@@ -104,17 +68,19 @@ pub fn gate_analysis(
     .fixes(fix_hints("analysis").iter().copied())
 }
 
-/// A `tool` the config names but this runner cannot drive is INCOMPLETE, never a pass.
+/// A `tool` the config names but this module cannot drive is INCOMPLETE, never a pass.
 fn unsupported_tool(
     config: &Config,
     target: &Target,
     tool: &str,
     contract: &str,
+    lang: Lang,
 ) -> Option<GateResult> {
+    let supported = lang.analysis_supported_tool();
     let named = config
         .section("analysis", Some(&target.name))
         .contains_key("tool");
-    if !named || tool == "rust-code-analysis" {
+    if !named || tool == supported {
         return None;
     }
 
@@ -124,11 +90,13 @@ fn unsupported_tool(
             INCOMPLETE,
             format!("tool `{tool}` is not supported by this runner"),
             [format!(
-                "`.mido.toml` names `{tool}`; this script only drives rust-code-analysis-cli"
+                "`.mido.toml` names `{tool}`; this module only drives {supported}-cli"
             )],
         )
         .contract(contract)
-        .fixes(["point [analysis] tool at rust-code-analysis, or extend the runner with a parser for that tool"]),
+        .fixes([format!(
+            "point [analysis] tool at {supported}, or extend the module with a parser for that tool"
+        )]),
     )
 }
 
@@ -176,7 +144,8 @@ fn judge_units(units: &[Unit], mi_min: f64, cognitive_max: f64) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{FakeRunner, MiniRepo};
+    use crate::lang::Lang;
+    use crate::test_support::MiniRepo;
 
     fn repo(config: Option<&str>) -> MiniRepo {
         MiniRepo::build(config)
@@ -191,65 +160,12 @@ mod tests {
     }
 
     fn config_for(repo: &MiniRepo) -> Config {
-        Config::load(&repo.root).expect("config loads")
+        Config::load(&repo.root, &Lang::Rust).expect("config loads")
     }
 
-    #[test]
-    fn function_metrics_are_read_from_the_tool() {
-        let repo = repo(None);
-        let document = serde_json::json!({
-            "spaces": [{ "name": "parse", "kind": "function", "metrics": { "loc": { "sloc": 9 }, "mi": { "mi_original": 40.0 } } }]
-        });
-        let runner = FakeRunner::with(&[("rust-code-analysis-cli", 0, &document.to_string())]);
-        let mut errors = Vec::new();
-
-        let units = analysis_units(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["src/foo.rs".to_string()],
-            &mut errors,
-        );
-
-        assert_eq!(units.len(), 1);
-        assert_eq!(units[0].name, "parse");
-        assert!(errors.is_empty());
-    }
-
-    #[test]
-    fn a_file_the_tool_cannot_read_is_an_error() {
-        let repo = repo(None);
-        let runner = FakeRunner::with(&[("rust-code-analysis-cli", 1, "")]);
-        let mut errors = Vec::new();
-
-        let units = analysis_units(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["src/foo.rs".to_string()],
-            &mut errors,
-        );
-
-        assert!(units.is_empty());
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].contains("could not read it"));
-    }
-
-    #[test]
-    fn unparsable_json_is_an_error() {
-        let repo = repo(None);
-        let runner = FakeRunner::with(&[("rust-code-analysis-cli", 0, "{oops")]);
-        let mut errors = Vec::new();
-
-        analysis_units(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["src/foo.rs".to_string()],
-            &mut errors,
-        );
-
-        assert!(errors.iter().any(|error| error.contains("no usable json")));
+    fn gate_run_for<'a>(repo: &'a MiniRepo, config: &'a Config) -> GateRun<'a> {
+        let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
+        crate::test_support::gate_run(&repo.root, target, config, &[])
     }
 
     #[test]
@@ -257,7 +173,7 @@ mod tests {
         let repo = repo(None);
         let units = vec![unit("good", 80.0, 2), unit("hard", 12.0, 30)];
 
-        let result = gate_analysis(&Target::workspace_target(), &config_for(&repo), &units, &[]);
+        let result = gate_analysis(&gate_run_for(&repo, &config_for(&repo)), &units, &[]);
 
         assert_eq!(result.status, FAIL);
         assert!(result
@@ -279,7 +195,7 @@ mod tests {
         let repo = repo(None);
         let units = vec![unit("good", 80.0, 2)];
 
-        let result = gate_analysis(&Target::workspace_target(), &config_for(&repo), &units, &[]);
+        let result = gate_analysis(&gate_run_for(&repo, &config_for(&repo)), &units, &[]);
 
         assert_eq!(result.status, PASS);
         assert_eq!(result.summary, "worst MI 80.0, cognitive 2");
@@ -290,7 +206,7 @@ mod tests {
     fn no_function_metrics_is_incomplete_never_a_pass() {
         let repo = repo(None);
 
-        let result = gate_analysis(&Target::workspace_target(), &config_for(&repo), &[], &[]);
+        let result = gate_analysis(&gate_run_for(&repo, &config_for(&repo)), &[], &[]);
 
         assert_eq!(result.status, INCOMPLETE);
         assert_eq!(result.summary, "no function metrics to judge");
@@ -301,12 +217,7 @@ mod tests {
         let repo = repo(None);
         let errors = vec!["src/foo.rs: rust-code-analysis could not read it (exit 1)".to_string()];
 
-        let result = gate_analysis(
-            &Target::workspace_target(),
-            &config_for(&repo),
-            &[],
-            &errors,
-        );
+        let result = gate_analysis(&gate_run_for(&repo, &config_for(&repo)), &[], &errors);
 
         assert_eq!(result.status, INCOMPLETE);
         assert_eq!(result.summary, errors[0]);
@@ -324,7 +235,7 @@ mod tests {
         ",
         ));
 
-        let result = gate_analysis(&Target::workspace_target(), &config_for(&repo), &[], &[]);
+        let result = gate_analysis(&gate_run_for(&repo, &config_for(&repo)), &[], &[]);
 
         assert_eq!(result.status, INCOMPLETE);
         assert!(result.summary.contains("`lizard` is not supported"));

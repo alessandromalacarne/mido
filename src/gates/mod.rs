@@ -2,13 +2,13 @@
 
 pub mod analysis;
 pub mod coverage;
-pub mod diagnostics;
 pub mod mutation;
 pub mod size;
 pub mod suite;
 pub mod syntax;
 
 use crate::config::Config;
+use crate::lang::Lang;
 use crate::metrics::Unit;
 use crate::process::Runner;
 use crate::report::{gate_line, gate_progress_line, GateResult, SKIPPED};
@@ -16,8 +16,6 @@ use crate::style::Style;
 use crate::targets::{Scope, Target};
 use std::io::Write;
 use std::path::Path;
-
-pub const RUST_EXT: &str = ".rs";
 
 pub fn fix_hints(gate: &str) -> &'static [&'static str] {
     match gate {
@@ -47,6 +45,7 @@ pub struct GateRun<'a> {
     pub repo: &'a Path,
     pub target: &'a Target,
     pub config: &'a Config,
+    pub lang: Lang,
     pub scope: Scope,
     pub changed: &'a [String],
     pub gates: &'a [String],
@@ -62,10 +61,10 @@ pub fn run_gates(
 ) -> Vec<GateResult> {
     // A deleted file has nothing to measure — the counting tools choke on a
     // path that is not there, so only files that still exist reach them.
-    let rust_changed: Vec<String> = run
+    let source_changed: Vec<String> = run
         .changed
         .iter()
-        .filter(|path| path.ends_with(RUST_EXT) && run.repo.join(path).exists())
+        .filter(|path| run.lang.is_source(path) && run.repo.join(path).exists())
         .cloned()
         .collect();
     let mut tool_errors: Vec<String> = Vec::new();
@@ -76,12 +75,12 @@ pub fn run_gates(
         .gates
         .iter()
         .any(|gate| gate == "size" || gate == "analysis");
-    let units: Vec<Unit> = if !rust_changed.is_empty() && wants_units {
-        analysis::analysis_units(
+    let units: Vec<Unit> = if !source_changed.is_empty() && wants_units {
+        run.lang.analysis_units(
             runner,
             run.repo,
             run.target,
-            &rust_changed,
+            &source_changed,
             &mut tool_errors,
         )
     } else {
@@ -108,16 +107,7 @@ fn run_one(
     units: &[Unit],
     tool_errors: &[String],
 ) -> GateResult {
-    let GateRun {
-        repo,
-        target,
-        config,
-        scope,
-        changed,
-        scratch,
-        baseline_lcov,
-        ..
-    } = *run;
+    let GateRun { target, config, .. } = *run;
 
     if !config.enabled(gate, Some(&target.name)) {
         return GateResult::new(
@@ -130,20 +120,12 @@ fn run_one(
     }
 
     match gate {
-        "syntax" => syntax::gate_syntax(runner, repo, target, changed, config),
-        "size" => size::gate_size(runner, repo, target, changed, config, units, tool_errors),
-        "analysis" => analysis::gate_analysis(target, config, units, tool_errors),
-        "tests" => suite::gate_tests(runner, repo, target, config),
-        "coverage" => coverage::gate_coverage(
-            runner,
-            repo,
-            target,
-            config,
-            changed,
-            baseline_lcov,
-            scratch,
-        ),
-        _ => mutation::gate_mutation(runner, repo, target, config, changed, scope, scratch),
+        "syntax" => syntax::gate_syntax(runner, run),
+        "size" => size::gate_size(runner, run, units, tool_errors),
+        "analysis" => analysis::gate_analysis(run, units, tool_errors),
+        "tests" => suite::gate_tests(runner, run),
+        "coverage" => coverage::gate_coverage(runner, run),
+        _ => mutation::gate_mutation(runner, run),
     }
 }
 
@@ -193,6 +175,7 @@ fn print_result(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::lang::Lang;
     use crate::test_support::{FakeRunner, MiniRepo};
 
     fn repo() -> MiniRepo {
@@ -225,19 +208,20 @@ mod tests {
             enabled = false
         ",
         ));
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let mut out = Vec::new();
 
         let results = run_gates(
             &FakeRunner::default(),
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &[],
                 gates: &["mutation".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut out,
@@ -256,7 +240,7 @@ mod tests {
     #[test]
     fn every_gate_reports_a_line_of_its_own() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 3 } }] } });
         let runner = FakeRunner::with(&[
             ("tokei", 0, &tokei.to_string()),
@@ -269,7 +253,7 @@ mod tests {
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &[
@@ -280,6 +264,7 @@ mod tests {
                 ],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut out,
@@ -295,7 +280,7 @@ mod tests {
     #[test]
     fn a_running_gate_announces_itself_on_a_terminal() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner =
             FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
                 .tool("cargo");
@@ -305,12 +290,13 @@ mod tests {
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["tests".to_string(), "syntax".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut out,
@@ -335,7 +321,7 @@ mod tests {
     #[test]
     fn a_piped_run_never_writes_a_live_line() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner =
             FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
                 .tool("cargo");
@@ -345,12 +331,13 @@ mod tests {
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["tests".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut out,
@@ -366,7 +353,7 @@ mod tests {
     #[test]
     fn a_detail_that_echoes_the_summary_is_not_printed_twice() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner =
             FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
                 .tool("cargo");
@@ -376,12 +363,13 @@ mod tests {
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["tests".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut out,
@@ -390,7 +378,9 @@ mod tests {
 
         let printed = String::from_utf8(out).expect("utf8");
         assert_eq!(
-            printed.matches("cargo test: 1 passed, 0 failed").count(),
+            printed
+                .matches("cargo test --all-features: 1 passed, 0 failed")
+                .count(),
             1,
             "{printed}"
         );
@@ -401,7 +391,7 @@ mod tests {
         let repo = repo();
         std::fs::create_dir_all(repo.root.join("src")).expect("dir");
         std::fs::write(repo.root.join("src/foo.rs"), "").expect("file");
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let document = serde_json::json!({
             "spaces": [{ "name": "f", "kind": "function", "metrics": { "loc": { "sloc": 5 } } }]
         });
@@ -416,12 +406,13 @@ mod tests {
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["size".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut Vec::new(),
@@ -436,19 +427,20 @@ mod tests {
     #[test]
     fn the_coverage_gate_is_dispatched_under_its_own_name() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner = FakeRunner::with(&[("llvm-cov", 101, "no coverage tool here")]).tool("cargo");
 
         let results = run_gates(
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["coverage".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut Vec::new(),
@@ -462,7 +454,7 @@ mod tests {
     #[test]
     fn the_gates_run_in_the_order_they_were_asked_for() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner =
             FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
                 .tool("cargo");
@@ -471,12 +463,13 @@ mod tests {
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["tests".to_string(), "syntax".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut Vec::new(),
@@ -490,19 +483,20 @@ mod tests {
     #[test]
     fn a_deleted_rust_file_is_not_measured() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner = FakeRunner::default().tool("cargo");
 
         let results = run_gates(
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/gone.rs".to_string()],
                 gates: &["size".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut Vec::new(),
@@ -517,19 +511,23 @@ mod tests {
     #[test]
     fn units_are_only_measured_for_the_gates_that_need_them() {
         let repo = repo();
-        let config = Config::load(&repo.root).expect("config loads");
+        // The file must exist, or the source filter would mask the gate set.
+        std::fs::create_dir_all(repo.root.join("src")).expect("dir");
+        std::fs::write(repo.root.join("src/foo.rs"), "").expect("file");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
         let runner = FakeRunner::with(&[("rust-code-analysis-cli", 1, "")]).tool("cargo");
 
         run_gates(
             &runner,
             &GateRun {
                 repo: &repo.root,
-                target: &Target::workspace_target(),
+                target: &Target::workspace_target("Cargo.toml"),
                 config: &config,
                 changed: &["src/foo.rs".to_string()],
                 gates: &["syntax".to_string()],
                 scratch: &repo.root,
                 scope: Scope::Diff,
+                lang: Lang::Rust,
                 baseline_lcov: None,
             },
             &mut Vec::new(),

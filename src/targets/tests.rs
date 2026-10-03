@@ -1,10 +1,6 @@
 use super::*;
+use crate::lang::Lang;
 use crate::test_support::MiniRepo;
-
-fn targets(repo: &MiniRepo) -> BTreeMap<String, Target> {
-    let config = Config::load(&repo.root).expect("config loads");
-    detect_targets(&repo.root, &config)
-}
 
 fn repo(config: Option<&str>) -> MiniRepo {
     MiniRepo::build(config)
@@ -12,143 +8,14 @@ fn repo(config: Option<&str>) -> MiniRepo {
 
 /// The `--path` list, resolved against a repo built for the case.
 fn paths(repo: &MiniRepo, specs: &[PathBuf]) -> Result<Vec<String>, GuardrailsError> {
-    let config = Config::load(&repo.root).expect("config loads");
-    explicit_paths(&repo.root, &config, specs)
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+    explicit_paths(&repo.root, &config, specs, Lang::Rust)
 }
 
 fn touch(repo: &MiniRepo, path: &str) {
     let full = repo.root.join(path);
     std::fs::create_dir_all(full.parent().expect("parent")).expect("dir");
     std::fs::write(full, "").expect("file");
-}
-
-#[test]
-fn workspace_members_collapse_into_one_target() {
-    let repo = repo(None);
-
-    let detected = targets(&repo);
-    let workspace = detected.get("workspace").expect("workspace target");
-
-    assert_eq!(workspace.path, "");
-    assert_eq!(workspace.scope, vec!["cli/", "api/", "lib/"]);
-    assert!(workspace.workspace_member);
-}
-
-#[test]
-fn excluded_crates_become_their_own_targets() {
-    let repo = repo(None);
-
-    let detected = targets(&repo);
-
-    assert_eq!(
-        detected.get("frontend").expect("frontend").scope,
-        vec!["frontend/"]
-    );
-    assert!(!detected.get("frontend").expect("frontend").workspace_member);
-    assert!(detected.contains_key("desktop"));
-}
-
-#[test]
-fn explicit_target_section_extends_the_detected_set() {
-    let repo = repo(Some(
-        "
-            version = 1
-
-            [targets.tui]
-            path = \"cli\"
-            scope = [\"cli/src/tui/\"]
-        ",
-    ));
-
-    assert_eq!(
-        targets(&repo).get("tui").expect("tui").scope,
-        vec!["cli/src/tui/"]
-    );
-}
-
-#[test]
-fn a_target_section_defaults_its_scope_to_its_path() {
-    let repo = repo(Some(
-        "
-            version = 1
-
-            [targets.api]
-            path = \"api\"
-        ",
-    ));
-
-    assert_eq!(targets(&repo).get("api").expect("api").scope, vec!["api/"]);
-}
-
-#[test]
-fn target_parameter_resolves_by_name() {
-    let repo = repo(None);
-    let config = Config::load(&repo.root).expect("config loads");
-
-    let target = resolve_target(&repo.root, &config, "frontend").expect("resolves");
-
-    assert_eq!(target.name, "frontend");
-    assert_eq!(target.path, "frontend");
-}
-
-#[test]
-fn target_parameter_resolves_by_path() {
-    let repo = repo(None);
-    let config = Config::load(&repo.root).expect("config loads");
-
-    let target = resolve_target(
-        &repo.root,
-        &config,
-        &repo.root.join("frontend").to_string_lossy(),
-    )
-    .expect("resolves");
-
-    assert_eq!(target.name, "frontend");
-    assert_eq!(target.dir(&repo.root), repo.root.join("frontend"));
-}
-
-#[test]
-fn a_path_outside_the_repo_resolves_to_its_own_target() {
-    let repo = repo(None);
-    let elsewhere = tempfile::tempdir().expect("temp dir");
-    std::fs::write(
-        elsewhere.path().join("Cargo.toml"),
-        "[package]\nname = \"outer\"\n",
-    )
-    .expect("manifest");
-    let config = Config::load(&repo.root).expect("config loads");
-
-    let target =
-        resolve_target(&repo.root, &config, &elsewhere.path().to_string_lossy()).expect("resolves");
-
-    assert_eq!(target.path, elsewhere.path().to_string_lossy());
-    assert!(!target.workspace_member);
-}
-
-#[test]
-fn unknown_target_is_a_setup_error_listing_the_known_names() {
-    let repo = repo(None);
-    let config = Config::load(&repo.root).expect("config loads");
-
-    let message = resolve_target(&repo.root, &config, "nope")
-        .expect_err("unknown target")
-        .render();
-
-    assert!(message.contains("nope"));
-    assert!(message.contains("frontend"));
-    assert!(message.contains("workspace"));
-}
-
-#[test]
-fn path_without_a_manifest_is_a_setup_error() {
-    let repo = repo(None);
-    let config = Config::load(&repo.root).expect("config loads");
-
-    let message = resolve_target(&repo.root, &config, "scripts")
-        .expect_err("no manifest")
-        .render();
-
-    assert!(message.contains("Cargo.toml"));
 }
 
 #[test]
@@ -167,7 +34,7 @@ fn root_target_keeps_repo_relative_paths() {
 
 #[test]
 fn crate_target_strips_its_own_prefix() {
-    let target = Target::crate_target("frontend", false);
+    let target = Target::crate_target("frontend", false, "Cargo.toml");
     let changed = vec![
         "frontend/src/main.rs".to_string(),
         "frontend/tests/app.rs".to_string(),
@@ -181,7 +48,7 @@ fn crate_target_strips_its_own_prefix() {
 
 #[test]
 fn files_outside_the_target_are_dropped() {
-    let target = Target::crate_target("frontend", false);
+    let target = Target::crate_target("frontend", false, "Cargo.toml");
     let changed = vec![
         "frontend/src/main.rs".to_string(),
         "lib/src/foo.rs".to_string(),
@@ -193,9 +60,22 @@ fn files_outside_the_target_are_dropped() {
 
 #[test]
 fn a_target_without_scope_covers_everything() {
-    let target = Target::workspace_target();
+    let target = Target::workspace_target("Cargo.toml");
 
     assert!(covers("anything/at/all.rs", &target));
+}
+
+#[test]
+fn a_manifest_path_joins_the_directory_and_the_file() {
+    assert_eq!(manifest_for("", "Cargo.toml"), "Cargo.toml");
+    assert_eq!(
+        manifest_for("frontend", "Cargo.toml"),
+        "frontend/Cargo.toml"
+    );
+    assert_eq!(
+        manifest_for("frontend", "package.json"),
+        "frontend/package.json"
+    );
 }
 
 fn auto_targets() -> BTreeMap<String, Target> {
@@ -212,7 +92,7 @@ fn auto_targets() -> BTreeMap<String, Target> {
     );
     targets.insert(
         "frontend".to_string(),
-        Target::crate_target("frontend", false),
+        Target::crate_target("frontend", false, "Cargo.toml"),
     );
     targets
 }
@@ -282,30 +162,8 @@ fn auto_target_refuses_to_measure_half_a_diff() {
 }
 
 #[test]
-fn workspace_layout_reads_members_and_excludes() {
-    let repo = repo(None);
-
-    let (members, excluded) = workspace_layout(&repo.root);
-
-    assert_eq!(members, vec!["cli", "api", "lib"]);
-    assert_eq!(excluded, vec!["frontend", "desktop"]);
-}
-
-#[test]
-fn targets_without_a_workspace_manifest_have_no_scope() {
-    let repo = repo(Some("version = 1\n"));
-    std::fs::remove_file(repo.root.join("Cargo.toml")).expect("no root manifest");
-
-    let detected = targets(&repo);
-    let workspace = detected.get("workspace").expect("workspace target");
-
-    assert!(workspace.scope.is_empty());
-    assert_eq!(workspace.manifest, None);
-}
-
-#[test]
 fn strip_leaves_foreign_paths_alone() {
-    let target = Target::crate_target("frontend", false);
+    let target = Target::crate_target("frontend", false, "Cargo.toml");
 
     assert_eq!(target.strip("lib/src/foo.rs"), "lib/src/foo.rs");
     assert_eq!(target.strip("frontend/src/main.rs"), "src/main.rs");
@@ -313,9 +171,12 @@ fn strip_leaves_foreign_paths_alone() {
 
 #[test]
 fn labels_show_the_directory() {
-    assert_eq!(Target::workspace_target().label(), "workspace (./)");
     assert_eq!(
-        Target::crate_target("frontend", false).label(),
+        Target::workspace_target("Cargo.toml").label(),
+        "workspace (./)"
+    );
+    assert_eq!(
+        Target::crate_target("frontend", false, "Cargo.toml").label(),
         "frontend (frontend/)"
     );
 }

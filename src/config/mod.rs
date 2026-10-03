@@ -6,6 +6,7 @@ pub mod validate;
 pub mod value;
 
 use crate::error::GuardrailsError;
+use crate::lang::Lang;
 use crate::targets::Target;
 use std::path::{Path, PathBuf};
 use toml::{Table, Value};
@@ -43,18 +44,24 @@ impl Threshold {
 pub struct Config {
     path: Option<PathBuf>,
     data: Table,
+    defaults: Table,
+    lang_name: &'static str,
     warnings: Vec<String>,
 }
 
 impl Config {
-    pub fn load(repo: &Path) -> Result<Self, GuardrailsError> {
+    pub fn load(repo: &Path, lang: &Lang) -> Result<Self, GuardrailsError> {
+        let defaults = lang.default_config().clone();
+        let lang_name = lang.name();
         let path = repo.join(".mido.toml");
         if !path.exists() {
             return Ok(Self {
                 path: None,
                 data: Table::new(),
+                defaults,
+                lang_name,
                 warnings: vec![format!(
-                    "no {} — falling back to built-in default thresholds",
+                    "no {} — falling back to the {lang_name} built-in defaults",
                     path.display()
                 )],
             });
@@ -84,6 +91,8 @@ impl Config {
         Ok(Self {
             path: Some(path),
             data,
+            defaults,
+            lang_name,
             warnings,
         })
     }
@@ -102,7 +111,7 @@ impl Config {
                 "`{}`",
                 path.file_name().unwrap_or_default().to_string_lossy()
             ),
-            None => "built-in defaults".to_string(),
+            None => format!("{} built-in defaults", self.lang_name),
         }
     }
 
@@ -122,14 +131,19 @@ impl Config {
             .and_then(value::as_table)
     }
 
-    /// Root `[gate]` merged with `[targets.<target>.<gate>]`; target wins.
+    /// Root `[gate]` merged with `[targets.<target>.<gate>]` — over the module
+    /// defaults, so the merged view is what actually applies; target wins.
     pub fn section(&self, gate: &str, target: Option<&str>) -> Table {
         let mut merged = self
-            .data
+            .defaults
             .get(gate)
             .and_then(value::as_table)
             .cloned()
             .unwrap_or_default();
+
+        if let Some(root) = self.data.get(gate).and_then(value::as_table) {
+            merged.extend(root.clone());
+        }
 
         if let Some(name) = target.filter(|name| *name != "workspace") {
             if let Some(overrides) = self
@@ -143,6 +157,8 @@ impl Config {
         merged
     }
 
+    /// The file's own `[gate]`/`[targets.<name>.<gate>]` value, with the module
+    /// defaults as the last layer.
     fn stored(&self, gate: &str, key: &str, target: Option<&str>) -> Option<&Value> {
         if let Some(name) = target.filter(|name| *name != "workspace") {
             if let Some(value) = self
@@ -158,6 +174,12 @@ impl Config {
             .get(gate)
             .and_then(value::as_table)
             .and_then(|section| section.get(key))
+            .or_else(|| {
+                self.defaults
+                    .get(gate)
+                    .and_then(value::as_table)
+                    .and_then(|section| section.get(key))
+            })
     }
 
     pub fn float(&self, gate: &str, key: &str, default: f64, target: Option<&str>) -> f64 {
@@ -207,11 +229,12 @@ impl Config {
 
     /// The argv this gate runs for this target, when the config declares one.
     ///
-    /// `[targets.<name>.<gate>]` wins. A root section is written for the
-    /// repo-level gate, so the workspace and its members inherit it — a
-    /// standalone crate (something the root manifest excludes) does not:
-    /// `--all-features` written for the workspace root pulls the backend
-    /// features into a wasm crate and breaks the build.
+    /// `[targets.<name>.<gate>]` wins. A root section — the file's or the
+    /// module defaults' — is written for the repo-level gate, so the workspace
+    /// and its members inherit it; a standalone crate (something the root
+    /// manifest excludes) does not: `--all-features` written for the workspace
+    /// root pulls the backend features into a wasm crate and breaks the build.
+    /// Standalone crates fall back to the module's bare commands instead.
     pub fn argv(&self, gate: &str, key: &str, target: &Target) -> Option<Vec<String>> {
         let overridden = self
             .target_table(&target.name)
@@ -230,8 +253,23 @@ impl Config {
             if let Some(value) = inherited {
                 return value::string_array(value);
             }
+            let baseline = self
+                .defaults
+                .get(gate)
+                .and_then(value::as_table)
+                .and_then(|section| section.get(key));
+            if let Some(value) = baseline {
+                return value::string_array(value);
+            }
         }
         None
+    }
+
+    /// The `[failure] max_attempts_per_gate` the report cites, from the file or
+    /// the module defaults.
+    pub fn attempts_cap(&self) -> Option<i64> {
+        self.stored("failure", "max_attempts_per_gate", None)
+            .and_then(value::as_int)
     }
 }
 

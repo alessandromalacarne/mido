@@ -183,7 +183,7 @@ fn failure_report_records_the_attempt_cap_when_the_config_has_one() {
 #[test]
 fn banner_reports_the_revision_it_measured() {
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             base: "origin/mvp",
             revision: "fa5bac38",
@@ -191,6 +191,8 @@ fn banner_reports_the_revision_it_measured() {
             changed: &["lib/src/foo.rs".to_string()],
             selected_how: "",
             runner: "",
+            source_label: "rust",
+            source_count: 1,
         },
         Style::plain(),
     );
@@ -204,7 +206,7 @@ fn banner_reports_the_revision_it_measured() {
 #[test]
 fn the_banner_is_a_panel_of_labelled_fields() {
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             base: "origin/mvp",
             revision: "fa5bac38",
@@ -212,6 +214,8 @@ fn the_banner_is_a_panel_of_labelled_fields() {
             changed: &["lib/src/foo.rs".to_string()],
             selected_how: "auto",
             runner: "scripts/guardrails.py",
+            source_label: "rust",
+            source_count: 1,
         },
         Style::plain(),
     );
@@ -259,7 +263,7 @@ fn a_panel_is_never_narrower_than_its_title() {
 #[test]
 fn the_panels_shorten_the_hashes_for_the_eye() {
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             revision: "fa5bac3800000000000000000000000000000000",
             dirty: "abc123000000000000000000000000000000000000",
@@ -289,7 +293,7 @@ fn the_panels_shorten_the_hashes_for_the_eye() {
 #[test]
 fn banner_names_the_runner_the_config_declares() {
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             base: "origin/mvp",
             revision: "fa5bac38",
@@ -297,6 +301,8 @@ fn banner_names_the_runner_the_config_declares() {
             changed: &["lib/src/foo.rs".to_string()],
             selected_how: "auto",
             runner: "scripts/guardrails.py",
+            source_label: "rust",
+            source_count: 1,
         },
         Style::plain(),
     );
@@ -310,10 +316,12 @@ fn banner_counts_the_rust_files_and_caps_the_listing() {
     let changed: Vec<String> = (0..25).map(|index| format!("src/file{index}.rs")).collect();
 
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             base: "HEAD",
             changed: &changed,
+            source_label: "rust",
+            source_count: changed.len(),
             ..BannerContext::default()
         },
         Style::plain(),
@@ -331,10 +339,12 @@ fn a_listing_of_exactly_the_cap_is_not_truncated() {
         .collect();
 
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             base: "HEAD",
             changed: &changed,
+            source_label: "rust",
+            source_count: changed.len(),
             ..BannerContext::default()
         },
         Style::plain(),
@@ -346,10 +356,12 @@ fn a_listing_of_exactly_the_cap_is_not_truncated() {
     let mut one_more = changed;
     one_more.push("src/over.rs".to_string());
     let banner = render_banner(
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &BannerContext {
             base: "HEAD",
             changed: &one_more,
+            source_label: "rust",
+            source_count: one_more.len(),
             ..BannerContext::default()
         },
         Style::plain(),
@@ -364,12 +376,14 @@ fn the_report_spells_out_the_fix_for_a_failing_gate() {
     let report = render_report_markdown(
         &results(),
         &ReportContext {
-            target: &Target::workspace_target(),
+            target: &Target::workspace_target("Cargo.toml"),
             base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
             runner: "",
+            source_label: "rust",
+            source_count: 1,
         },
     );
 
@@ -389,12 +403,14 @@ fn report_records_the_runner_the_config_declares() {
             Vec::<String>::new(),
         )],
         &ReportContext {
-            target: &Target::workspace_target(),
+            target: &Target::workspace_target("Cargo.toml"),
             base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
             runner: "scripts/guardrails.py",
+            source_label: "rust",
+            source_count: 1,
         },
     );
 
@@ -413,12 +429,14 @@ fn a_report_without_a_base_names_the_explicit_paths() {
             Vec::<String>::new(),
         )],
         &ReportContext {
-            target: &Target::workspace_target(),
+            target: &Target::workspace_target("Cargo.toml"),
             base: "",
             revision: "fa5bac38",
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
             runner: "",
+            source_label: "rust",
+            source_count: 1,
         },
     );
 

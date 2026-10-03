@@ -1,7 +1,6 @@
 //! Gate 5 — coverage of the changed code.
 
-use crate::config::Config;
-use crate::gates::fix_hints;
+use crate::gates::{fix_hints, GateRun};
 use crate::metrics::{lcov_files, percent, relative_to, touches, LcovStat};
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
@@ -116,25 +115,23 @@ pub fn judge_coverage_delta(
     (Vec::new(), details)
 }
 
-pub fn gate_coverage(
-    runner: &dyn Runner,
-    repo: &Path,
-    target: &Target,
-    config: &Config,
-    changed: &[String],
-    baseline_lcov: Option<&Path>,
-    scratch: &Path,
-) -> GateResult {
+pub fn gate_coverage(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
+    let GateRun {
+        repo,
+        target,
+        config,
+        lang,
+        changed,
+        scratch,
+        baseline_lcov,
+        ..
+    } = *run;
     let minimum = config.float("coverage", "changed_file_min", 80.0, Some(&target.name));
     let drop_max = config.float("coverage", "total_drop_max", 0.0, Some(&target.name));
     let argv = config
         .argv("coverage", "command", target)
-        .unwrap_or_else(|| {
-            ["cargo", "llvm-cov", "--lcov", "--output-path", "{lcov}"]
-                .iter()
-                .map(|arg| (*arg).to_string())
-                .collect()
-        });
+        .or_else(|| lang.fallback_argv("coverage", "command"))
+        .unwrap_or_default();
     let (argv, report_path) = coverage_report_path(&argv, repo, target, scratch);
     let command = argv.join(" ");
     let contract = format!(
@@ -142,7 +139,7 @@ pub fn gate_coverage(
         config.source()
     );
 
-    let result = process::dev(runner, &target.dir(repo), &argv, None);
+    let result = process::dev(runner, lang.env_tool(), &target.dir(repo), &argv, None);
     if !result.ok() || !report_path.exists() {
         return missing_report(&result, &command, &report_path, &contract);
     }
@@ -230,6 +227,8 @@ fn judge_coverage(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::lang::Lang;
     use crate::test_support::{FakeRunner, MiniRepo};
 
     fn repo() -> MiniRepo {
@@ -237,7 +236,16 @@ mod tests {
     }
 
     fn config_for(repo: &MiniRepo) -> Config {
-        Config::load(&repo.root).expect("config loads")
+        Config::load(&repo.root, &Lang::Rust).expect("config loads")
+    }
+
+    fn gate_run_for<'a>(
+        repo: &'a MiniRepo,
+        config: &'a Config,
+        changed: &'a [String],
+    ) -> GateRun<'a> {
+        let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
+        crate::test_support::gate_run(&repo.root, target, config, changed)
     }
 
     fn argv(items: &[&str]) -> Vec<String> {
@@ -256,7 +264,7 @@ mod tests {
         let (command, path) = coverage_report_path(
             &argv(&["cargo", "llvm-cov", "--lcov", "--output-path", "{lcov}"]),
             &repo.root,
-            &Target::workspace_target(),
+            &Target::workspace_target("Cargo.toml"),
             &scratch,
         );
 
@@ -271,7 +279,7 @@ mod tests {
         let (_, path) = coverage_report_path(
             &argv(&["cargo", "llvm-cov", "--lcov", "--output-path", "lcov.info"]),
             &repo.root,
-            &Target::crate_target("frontend", false),
+            &Target::crate_target("frontend", false, "Cargo.toml"),
             &repo.root,
         );
 
@@ -285,7 +293,7 @@ mod tests {
         let (_, path) = coverage_report_path(
             &argv(&["cargo", "llvm-cov", "--output-path=lcov.info"]),
             &repo.root,
-            &Target::workspace_target(),
+            &Target::workspace_target("Cargo.toml"),
             &repo.root,
         );
 
@@ -299,7 +307,7 @@ mod tests {
         let (_, path) = coverage_report_path(
             &argv(&["cargo", "llvm-cov"]),
             &repo.root,
-            &Target::workspace_target(),
+            &Target::workspace_target("Cargo.toml"),
             &repo.root,
         );
 
@@ -309,23 +317,14 @@ mod tests {
     #[test]
     fn coverage_gate_enforces_the_changed_file_minimum() {
         let repo = repo();
-        let scratch = repo.root.join("scratch");
-        std::fs::create_dir_all(&scratch).expect("scratch");
+        // The embedded rust baseline writes `lcov.info` next to the target.
         write_report(
-            &scratch.join("guardrails-lcov-workspace.info"),
+            &repo.root.join("lcov.info"),
             "SF:/repo/lib/src/foo.rs\nLH:2\nLF:10\nend_of_record\n",
         );
         let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-
-        let result = gate_coverage(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &config_for(&repo),
-            &["lib/src/foo.rs".to_string()],
-            None,
-            &scratch,
-        );
+        let changed = vec!["lib/src/foo.rs".to_string()];
+        let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.status, FAIL);
         assert!(result.details.join(" ").contains("20.0%"));
@@ -335,19 +334,9 @@ mod tests {
     #[test]
     fn a_missing_report_is_incomplete_not_a_pass() {
         let repo = repo();
-        let scratch = repo.root.join("scratch");
-        std::fs::create_dir_all(&scratch).expect("scratch");
         let runner = FakeRunner::with(&[("llvm-cov", 101, "error: no such command")]);
-
-        let result = gate_coverage(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &config_for(&repo),
-            &["lib/src/foo.rs".to_string()],
-            None,
-            &scratch,
-        );
+        let changed = vec!["lib/src/foo.rs".to_string()];
+        let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.status, INCOMPLETE);
         assert!(result
@@ -360,23 +349,13 @@ mod tests {
     #[test]
     fn changed_files_absent_from_the_report_are_called_unverified() {
         let repo = repo();
-        let scratch = repo.root.join("scratch");
-        std::fs::create_dir_all(&scratch).expect("scratch");
         write_report(
-            &scratch.join("guardrails-lcov-workspace.info"),
+            &repo.root.join("lcov.info"),
             "SF:/repo/lib/src/other.rs\nLH:10\nLF:10\nend_of_record\n",
         );
         let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-
-        let result = gate_coverage(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &config_for(&repo),
-            &["lib/src/foo.rs".to_string()],
-            None,
-            &scratch,
-        );
+        let changed = vec!["lib/src/foo.rs".to_string()];
+        let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.status, PASS);
         assert!(result.details.join(" ").contains("unverified, not 100%"));
@@ -385,10 +364,8 @@ mod tests {
     #[test]
     fn a_total_drop_beyond_the_allowance_fails_the_gate() {
         let repo = repo();
-        let scratch = repo.root.join("scratch");
-        std::fs::create_dir_all(&scratch).expect("scratch");
         write_report(
-            &scratch.join("guardrails-lcov-workspace.info"),
+            &repo.root.join("lcov.info"),
             "SF:/repo/lib/src/foo.rs\nLH:5\nLF:10\nend_of_record\n",
         );
         let baseline = repo.root.join("baseline.info");
@@ -397,16 +374,11 @@ mod tests {
             "SF:/repo/lib/src/foo.rs\nLH:10\nLF:10\nend_of_record\n",
         );
         let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-
-        let result = gate_coverage(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &config_for(&repo),
-            &["lib/src/foo.rs".to_string()],
-            Some(&baseline),
-            &scratch,
-        );
+        let changed = vec!["lib/src/foo.rs".to_string()];
+        let config = config_for(&repo);
+        let mut run = gate_run_for(&repo, &config, &changed);
+        run.baseline_lcov = Some(&baseline);
+        let result = gate_coverage(&runner, &run);
 
         assert_eq!(result.status, FAIL);
         assert!(result
@@ -436,7 +408,7 @@ mod tests {
         let (problems, details) = judge_changed_coverage(
             &files,
             &["lib/src/foo.rs".to_string()],
-            &Target::workspace_target(),
+            &Target::workspace_target("Cargo.toml"),
             80.0,
         );
 
@@ -457,7 +429,7 @@ mod tests {
         let (problems, details) = judge_changed_coverage(
             &files,
             &["frontend/src/main.rs".to_string()],
-            &Target::crate_target("frontend", false),
+            &Target::crate_target("frontend", false, "Cargo.toml"),
             80.0,
         );
 

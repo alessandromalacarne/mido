@@ -1,19 +1,17 @@
 //! One run of the ladder: what it measures, in what order, and what it prints.
 
-use crate::aid::validate_target_setup;
 use crate::cli::Args;
 use crate::config::Config;
 use crate::error::{GateFailure, GuardrailsError, RunError};
 use crate::gates::{run_gates, GateRun};
+use crate::lang::Lang;
 use crate::process::{self, Runner};
 use crate::report::{
     exit_code, render_banner, render_failure, render_report_markdown, render_verdict, verdict,
     BannerContext, FailureContext, GateResult, ReportContext, GATES, MAX_BANNER_FILES,
 };
 use crate::style::Style;
-use crate::targets::{
-    detect_targets, explicit_paths, pick_auto_target, resolve_target, scope_changed, Scope, Target,
-};
+use crate::targets::{explicit_paths, pick_auto_target, scope_changed, Scope, Target};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -28,6 +26,7 @@ pub struct Io<'a> {
 pub struct Session {
     pub repo: PathBuf,
     pub config: Config,
+    pub lang: Lang,
     pub scope: Scope,
     pub base: String,
     pub changed: Vec<String>,
@@ -90,6 +89,7 @@ pub fn build_session(
     repo: &Path,
     config: Config,
     runner: &dyn Runner,
+    lang: Lang,
 ) -> Result<Session, GuardrailsError> {
     // `--path` is the whole scope: no base is picked and no diff is read.
     let (scope, base, changed) = if args.path.is_empty() {
@@ -103,13 +103,14 @@ pub fn build_session(
         (
             Scope::Paths,
             String::new(),
-            explicit_paths(repo, &config, &args.path)?,
+            explicit_paths(repo, &config, &args.path, lang)?,
         )
     };
 
     Ok(Session {
         repo: repo.to_path_buf(),
         config,
+        lang,
         scope,
         base,
         changed,
@@ -226,7 +227,7 @@ fn requested_target(args: &Args, session: &Session) -> Result<Option<Target>, Gu
     if args.all || args.target == "auto" {
         return Ok(None);
     }
-    Ok(Some(resolve_target(
+    Ok(Some(session.lang.resolve_target(
         &session.repo,
         &session.config,
         &args.target,
@@ -273,6 +274,7 @@ fn report_nothing_to_measure(out: &mut dyn Write, session: &Session, style: Styl
 }
 
 pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult]) -> String {
+    let changed = scope_changed(&session.changed, target);
     render_report_markdown(
         results,
         &ReportContext {
@@ -280,8 +282,13 @@ pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult
             base: &session.base,
             revision: &session.revision,
             dirty: &session.dirty,
-            changed: &scope_changed(&session.changed, target),
+            changed: &changed,
             runner: session.config.script().as_deref().unwrap_or_default(),
+            source_label: session.lang.source_label(),
+            source_count: changed
+                .iter()
+                .filter(|path| session.lang.is_source(path))
+                .count(),
         },
     )
 }
@@ -341,34 +348,18 @@ pub fn run_target(
     let _ = writeln!(
         io.out,
         "{}",
-        render_banner(
-            target,
-            &BannerContext {
-                base: &session.base,
-                revision: &session.revision,
-                dirty: &session.dirty,
-                changed: &scoped,
-                selected_how: &session.selection,
-                runner: session.config.script().as_deref().unwrap_or_default(),
-            },
-            io.style,
-        )
+        target_banner(session, target, &scoped, io.style)
     );
     let _ = writeln!(io.out);
 
     if scoped.is_empty() {
-        let _ = writeln!(
-            io.out,
-            "{}\n",
-            io.style.dim(&format!(
-                "no changed file belongs to {} — skipping.",
-                target.label()
-            ))
-        );
+        let _ = writeln!(io.out, "{}\n", skip_note(target, io.style));
         return Ok(None);
     }
 
-    validate_target_setup(runner, &session.repo, target, session.apply_aid, io.out)?;
+    session
+        .lang
+        .validate_target_setup(runner, &session.repo, target, session.apply_aid, io.out)?;
 
     let results = run_gates(
         runner,
@@ -376,6 +367,7 @@ pub fn run_target(
             repo: &session.repo,
             target,
             config: &session.config,
+            lang: session.lang,
             scope: session.scope,
             changed: &scoped,
             gates: &session.gates,
@@ -386,6 +378,36 @@ pub fn run_target(
         io.style,
     );
     Ok(Some(results))
+}
+
+/// The banner a target's run opens with.
+fn target_banner(session: &Session, target: &Target, scoped: &[String], style: Style) -> String {
+    let source_count = scoped
+        .iter()
+        .filter(|path| session.lang.is_source(path))
+        .count();
+    render_banner(
+        target,
+        &BannerContext {
+            base: &session.base,
+            revision: &session.revision,
+            dirty: &session.dirty,
+            changed: scoped,
+            selected_how: &session.selection,
+            runner: session.config.script().as_deref().unwrap_or_default(),
+            source_label: session.lang.source_label(),
+            source_count,
+        },
+        style,
+    )
+}
+
+/// A target that owns none of the diff is skipped with a note, never silently.
+fn skip_note(target: &Target, style: Style) -> String {
+    style.dim(&format!(
+        "no changed file belongs to {} — skipping.",
+        target.label()
+    ))
 }
 
 pub fn write_report(
@@ -416,13 +438,7 @@ fn raise_blocked(
     reports: &[String],
     io: &mut Io<'_>,
 ) -> RunError {
-    let attempts = session
-        .config
-        .data()
-        .get("failure")
-        .and_then(crate::config::value::as_table)
-        .and_then(|section| section.get("max_attempts_per_gate"))
-        .and_then(crate::config::value::as_int);
+    let attempts = session.config.attempts_cap();
     let final_verdict = verdict(results);
     let failure = render_failure(
         results,
@@ -450,22 +466,20 @@ pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<
         .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let repo = process::workspace_root(runner, &cwd);
-    let config = Config::load(&repo)?;
+    let lang = resolve_lang(args, &repo)?;
+    let config = Config::load(&repo, &lang)?;
+    announce_warnings(&config, io);
 
-    for warning in config.warnings() {
-        let _ = writeln!(io.err, "{} {warning}", io.style.warn("warning:"));
-    }
-
-    let targets = detect_targets(&repo, &config);
+    let targets = lang.detect_targets(&repo, &config);
     if args.list_targets {
         print_targets(io.out, &repo, &targets, io.style);
         return Ok(0);
     }
     if targets.is_empty() {
-        return Err(no_targets_error(&repo));
+        return Err(RunError::Error(lang.no_targets_error(&repo)));
     }
 
-    let session = build_session(args, &repo, config, runner)?;
+    let session = build_session(args, &repo, config, runner, lang)?;
     let Some(selected) = select_targets(args, &session, &targets, io.out, io.style)? else {
         return Ok(2);
     };
@@ -478,6 +492,21 @@ pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<
 
     write_report(session.report_path.as_deref(), &reports, io.out, io.style);
     Ok(0)
+}
+
+/// The language module this run uses: the one `--lang` names, or the one the
+/// repo itself selects.
+fn resolve_lang(args: &Args, repo: &Path) -> Result<Lang, RunError> {
+    match args.lang {
+        Some(arg) => Ok(arg.lang()),
+        None => Ok(Lang::infer(repo)?),
+    }
+}
+
+fn announce_warnings(config: &Config, io: &mut Io<'_>) {
+    for warning in config.warnings() {
+        let _ = writeln!(io.err, "{} {warning}", io.style.warn("warning:"));
+    }
 }
 
 /// Every selected target, in turn; the first blocked one ends the run.
@@ -519,13 +548,6 @@ fn report_no_gates(io: &mut Io<'_>) {
         io.style
             .dim("A gate that did not run is not a gate that passed — nothing here is ship-ready.")
     );
-}
-
-fn no_targets_error(repo: &Path) -> RunError {
-    RunError::Error(
-        GuardrailsError::setup(format!("no cargo target found under {}", repo.display()))
-            .hint("the ladder measures cargo targets; run it from the repo root"),
-    )
 }
 
 #[cfg(test)]

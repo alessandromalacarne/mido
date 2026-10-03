@@ -1,39 +1,8 @@
 use super::*;
 use crate::cli::parse_from;
+use crate::lang::Lang;
 use crate::report::PASS;
-use crate::targets::detect_targets;
-use crate::test_support::{FakeRunner, MiniRepo};
-
-fn drains() -> (Vec<u8>, Vec<u8>) {
-    (Vec::new(), Vec::new())
-}
-
-fn run(argv: &[&str], runner: &FakeRunner) -> (i32, String, String) {
-    let args = parse_from(argv);
-    let (mut out, mut err) = drains();
-    let code = crate::cli::main_with(
-        &args,
-        runner,
-        &mut out,
-        &mut err,
-        crate::style::Style::plain(),
-    );
-    (
-        code,
-        String::from_utf8_lossy(&out).to_string(),
-        String::from_utf8_lossy(&err).to_string(),
-    )
-}
-
-/// A runner whose git answers say "one changed file under lib/".
-fn changed_runner(tests: (i32, &str)) -> FakeRunner {
-    FakeRunner::with(&[
-        ("merge-base", 0, "base\n"),
-        ("--name-only", 0, "lib/src/foo.rs\n"),
-        ("hash-object", 0, "dirtyhash\n"),
-        ("cargo test", tests.0, tests.1),
-    ])
-}
+use crate::test_support::{changed_runner, run_cli as run, FakeRunner, MiniRepo};
 
 #[test]
 fn list_targets_prints_the_detected_set() {
@@ -47,6 +16,24 @@ fn list_targets_prints_the_detected_set() {
     assert!(out.contains("frontend"));
     assert!(out.contains("workspace"));
     assert!(out.contains("standalone crate"));
+}
+
+#[test]
+fn a_config_without_a_version_warns_on_stderr() {
+    let repo = MiniRepo::build(Some(
+        "
+            [tests]
+            command = [\"cargo\", \"test\"]
+        ",
+    ));
+    let (code, _, err) = run(
+        &["--repo", &repo.root.to_string_lossy(), "--list-targets"],
+        &FakeRunner::default(),
+    );
+
+    assert_eq!(code, 0);
+    assert!(err.contains("warning:"), "{err}");
+    assert!(err.contains("version"), "{err}");
 }
 
 #[test]
@@ -123,8 +110,9 @@ fn a_run_without_a_gate_selection_uses_all_six() {
     let session = build_session(
         &parse_from(&["--repo", "."]),
         &repo.root,
-        Config::load(&repo.root).expect("config"),
+        Config::load(&repo.root, &Lang::Rust).expect("config"),
         &FakeRunner::default(),
+        Lang::Rust,
     )
     .expect("session");
 
@@ -149,10 +137,11 @@ fn a_target_owning_none_of_the_diff_leaves_nothing_ship_ready() {
 #[test]
 fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root).expect("config loads");
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let session = Session {
         repo: repo.root.clone(),
         config,
+        lang: Lang::Rust,
         base: "HEAD".to_string(),
         scope: Scope::Diff,
         changed: vec!["lib/src/foo.rs".to_string()],
@@ -166,7 +155,7 @@ fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
         as_json: false,
         selection: "auto".to_string(),
     };
-    let (mut out, mut err) = drains();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut io = Io {
         out: &mut out,
         err: &mut err,
@@ -176,7 +165,7 @@ fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
     let results = run_target(
         &FakeRunner::default(),
         &session,
-        &Target::crate_target("frontend", false),
+        &Target::crate_target("frontend", false, "Cargo.toml"),
         &mut io,
     )
     .expect("no setup error");
@@ -197,13 +186,13 @@ fn the_report_path_follows_the_session_scratchpad() {
 #[test]
 fn targets_are_listed_with_their_kind() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root).expect("config loads");
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let mut out = Vec::new();
 
     print_targets(
         &mut out,
         &repo.root,
-        &detect_targets(&repo.root, &config),
+        &Lang::Rust.detect_targets(&repo.root, &config),
         crate::style::Style::plain(),
     );
 
@@ -218,9 +207,12 @@ fn the_target_table_aligns_on_its_widest_name() {
     let targets = BTreeMap::from([
         (
             "a-very-long-target-name".to_string(),
-            Target::crate_target("a-very-long-target-name", false),
+            Target::crate_target("a-very-long-target-name", false, "Cargo.toml"),
         ),
-        ("api".to_string(), Target::crate_target("api", false)),
+        (
+            "api".to_string(),
+            Target::crate_target("api", false, "Cargo.toml"),
+        ),
     ]);
     let mut out = Vec::new();
 
@@ -376,10 +368,11 @@ fn a_target_without_a_manifest_is_a_setup_error() {
 #[test]
 fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root).expect("config loads");
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let session = Session {
         repo: repo.root.clone(),
         config,
+        lang: Lang::Rust,
         base: "HEAD".to_string(),
         scope: Scope::Diff,
         changed: vec!["README.md".to_string()],
@@ -393,7 +386,7 @@ fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
         as_json: false,
         selection: "auto".to_string(),
     };
-    let targets = detect_targets(&repo.root, &session.config);
+    let targets = Lang::Rust.detect_targets(&repo.root, &session.config);
     let mut out = Vec::new();
 
     let selected = select_targets(
@@ -412,10 +405,11 @@ fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
 #[test]
 fn every_target_can_be_selected_with_all() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root).expect("config loads");
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let session = Session {
         repo: repo.root.clone(),
         config,
+        lang: Lang::Rust,
         base: "HEAD".to_string(),
         scope: Scope::Diff,
         changed: vec!["lib/src/foo.rs".to_string()],
@@ -429,7 +423,7 @@ fn every_target_can_be_selected_with_all() {
         as_json: false,
         selection: "auto".to_string(),
     };
-    let targets = detect_targets(&repo.root, &session.config);
+    let targets = Lang::Rust.detect_targets(&repo.root, &session.config);
 
     let selected = select_targets(
         &parse_from(&["--all"]),
@@ -450,7 +444,8 @@ fn a_pass_verdict_line_matches_the_gate_result() {
     let repo = MiniRepo::build(None);
     let session = Session {
         repo: repo.root.clone(),
-        config: Config::load(&repo.root).expect("config loads"),
+        config: Config::load(&repo.root, &Lang::Rust).expect("config loads"),
+        lang: Lang::Rust,
         base: "HEAD".to_string(),
         scope: Scope::Diff,
         changed: Vec::new(),
@@ -469,7 +464,7 @@ fn a_pass_verdict_line_matches_the_gate_result() {
     print_verdict(
         &mut out,
         &session,
-        &Target::workspace_target(),
+        &Target::workspace_target("Cargo.toml"),
         &[GateResult::new(
             "tests",
             PASS,
@@ -523,7 +518,7 @@ fn an_empty_scratchpad_variable_is_not_a_sandbox() {
 #[test]
 fn the_session_records_how_the_target_was_chosen() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root).expect("config loads");
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::default();
 
     let auto = build_session(
@@ -531,6 +526,7 @@ fn the_session_records_how_the_target_was_chosen() {
         &repo.root,
         config.clone(),
         &runner,
+        Lang::Rust,
     )
     .expect("session");
     assert_eq!(auto.selection, "auto");
@@ -540,6 +536,7 @@ fn the_session_records_how_the_target_was_chosen() {
         &repo.root,
         config,
         &runner,
+        Lang::Rust,
     )
     .expect("session");
     assert_eq!(requested.selection, "requested");

@@ -1,6 +1,7 @@
 //! The command line the ladder is driven with.
 
 use crate::error::RunError;
+use crate::lang::Lang;
 use crate::process::Runner;
 use crate::session::{run_session, Io};
 use crate::style::Style;
@@ -20,6 +21,10 @@ pub struct Args {
     /// target name or path; default `auto` (inferred from the diff)
     #[arg(default_value = "auto")]
     pub target: String,
+
+    /// language module; default: inferred from the repo (a root Cargo.toml selects rust)
+    #[arg(long)]
+    pub lang: Option<LangArg>,
 
     /// repository (or worktree) root; defaults to cwd
     #[arg(long)]
@@ -70,6 +75,20 @@ pub enum Gate {
     Tests,
     Coverage,
     Mutation,
+}
+
+/// The language modules `--lang` can force, overriding inference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LangArg {
+    Rust,
+}
+
+impl LangArg {
+    pub fn lang(self) -> Lang {
+        match self {
+            LangArg::Rust => Lang::Rust,
+        }
+    }
 }
 
 impl Gate {
@@ -132,6 +151,19 @@ mod tests {
     #[test]
     fn the_default_target_is_auto() {
         assert_eq!(parse_from(&[]).target, "auto");
+    }
+
+    #[test]
+    fn the_language_flag_selects_a_module() {
+        assert_eq!(parse_from(&["--lang", "rust"]).lang, Some(LangArg::Rust));
+    }
+
+    #[test]
+    fn an_unknown_language_is_never_silently_accepted() {
+        let rejected = try_parse_from(&["--lang", "python"]);
+
+        assert!(rejected.is_err(), "an unknown module is not a module");
+        assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
     }
 
     #[test]

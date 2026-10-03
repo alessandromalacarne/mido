@@ -1,8 +1,9 @@
 use super::*;
+use crate::lang::Lang;
 use crate::test_support::MiniRepo;
 
 fn load(repo: &MiniRepo) -> Result<Config, GuardrailsError> {
-    Config::load(&repo.root)
+    Config::load(&repo.root, &Lang::Rust)
 }
 
 fn repo(config: &str) -> MiniRepo {
@@ -15,7 +16,8 @@ fn argv(items: &[&str]) -> Vec<String> {
 
 #[test]
 fn repo_config_is_valid() {
-    let config = Config::load(Path::new(env!("CARGO_MANIFEST_DIR"))).expect("repo config loads");
+    let config = Config::load(Path::new(env!("CARGO_MANIFEST_DIR")), &Lang::Rust)
+        .expect("repo config loads");
 
     assert_eq!(
         config.threshold("size", "file_loc", Threshold::new(1, 2), None),
@@ -25,7 +27,8 @@ fn repo_config_is_valid() {
 
 #[test]
 fn repo_config_declares_every_gate() {
-    let config = Config::load(Path::new(env!("CARGO_MANIFEST_DIR"))).expect("repo config loads");
+    let config = Config::load(Path::new(env!("CARGO_MANIFEST_DIR")), &Lang::Rust)
+        .expect("repo config loads");
 
     for gate in keys::GATES {
         assert!(
@@ -49,7 +52,7 @@ fn lint_command_comes_from_the_config() {
     let config = load(&repo).expect("config loads");
 
     assert_eq!(
-        config.argv("syntax", "lint", &Target::workspace_target()),
+        config.argv("syntax", "lint", &Target::workspace_target("Cargo.toml")),
         Some(argv(&["cargo", "clippy", "--", "-D", "warnings"]))
     );
 }
@@ -197,7 +200,7 @@ fn standalone_crate_does_not_inherit_the_root_lint_command() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let frontend = Target::crate_target("frontend", false);
+    let frontend = Target::crate_target("frontend", false, "Cargo.toml");
 
     assert_eq!(config.argv("syntax", "lint", &frontend), None);
 }
@@ -213,7 +216,7 @@ fn workspace_member_inherits_the_root_lint_command() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let lib = Target::crate_target("lib", true);
+    let lib = Target::crate_target("lib", true, "Cargo.toml");
 
     assert_eq!(
         config.argv("syntax", "lint", &lib),
@@ -240,7 +243,7 @@ fn target_section_wins_over_the_root_command() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let frontend = Target::crate_target("frontend", false);
+    let frontend = Target::crate_target("frontend", false, "Cargo.toml");
 
     assert_eq!(
         config.argv("syntax", "lint", &frontend),
@@ -312,12 +315,12 @@ fn script_key_must_be_a_string() {
 }
 
 #[test]
-fn missing_config_falls_back_to_built_in_defaults() {
+fn missing_config_falls_back_to_the_module_defaults() {
     let repo = MiniRepo::build(None);
 
     let config = load(&repo).expect("defaults load");
 
-    assert_eq!(config.source(), "built-in defaults");
+    assert_eq!(config.source(), "rust built-in defaults");
     assert_eq!(
         config.threshold("size", "file_loc", Threshold::new(300, 500), None),
         Threshold::new(300, 500)
@@ -396,10 +399,91 @@ fn commands_are_read_as_argv() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let target = Target::workspace_target();
+    let target = Target::workspace_target("Cargo.toml");
 
     assert_eq!(
         config.argv("tests", "command", &target),
         Some(argv(&["cargo", "test", "--all-features"]))
     );
+}
+
+#[test]
+fn module_defaults_fill_a_config_that_is_silent() {
+    let repo = MiniRepo::build(None);
+    let config = load(&repo).expect("defaults load");
+    let workspace = Target::workspace_target("Cargo.toml");
+
+    assert_eq!(
+        config.threshold("size", "file_loc", Threshold::new(1, 2), None),
+        Threshold::new(300, 500)
+    );
+    assert_eq!(config.float("analysis", "mi_min", 0.0, None), 20.0);
+    assert_eq!(
+        config.argv("tests", "command", &workspace),
+        Some(argv(&["cargo", "test", "--all-features"]))
+    );
+}
+
+#[test]
+fn the_file_overrides_a_module_default_key_by_key() {
+    let repo = repo(
+        "
+            version = 1
+
+            [size]
+            file_loc = { warn = 100, fail = 200 }
+        ",
+    );
+    let config = load(&repo).expect("config loads");
+
+    assert_eq!(
+        config.threshold("size", "file_loc", Threshold::new(1, 2), None),
+        Threshold::new(100, 200),
+        "the file's value wins"
+    );
+    assert_eq!(
+        config.threshold("size", "nesting", Threshold::new(1, 2), None),
+        Threshold::new(3, 4),
+        "untouched keys still come from the module defaults"
+    );
+}
+
+#[test]
+fn a_standalone_crate_never_inherits_module_default_commands() {
+    let repo = MiniRepo::build(None);
+    let config = load(&repo).expect("defaults load");
+    let frontend = Target::crate_target("frontend", false, "Cargo.toml");
+
+    assert_eq!(
+        config.argv("tests", "command", &frontend),
+        None,
+        "the gate falls back to the module's bare command instead"
+    );
+}
+
+#[test]
+fn a_standalone_crate_still_reads_module_default_thresholds() {
+    let repo = MiniRepo::build(None);
+    let config = load(&repo).expect("defaults load");
+
+    assert_eq!(
+        config.threshold("size", "file_loc", Threshold::new(1, 2), Some("frontend")),
+        Threshold::new(300, 500)
+    );
+}
+
+#[test]
+fn the_failure_cap_comes_from_the_file_or_the_module_defaults() {
+    let repo = repo(
+        "
+            version = 1
+
+            [failure]
+            max_attempts_per_gate = 5
+        ",
+    );
+    assert_eq!(load(&repo).expect("config loads").attempts_cap(), Some(5));
+
+    let bare = MiniRepo::build(None);
+    assert_eq!(load(&bare).expect("defaults load").attempts_cap(), Some(3));
 }

@@ -246,10 +246,11 @@ pub fn validate_script_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lang::Lang;
     use crate::test_support::MiniRepo;
 
     fn load(repo: &MiniRepo) -> Result<crate::config::Config, GuardrailsError> {
-        crate::config::Config::load(&repo.root)
+        crate::config::Config::load(&repo.root, &Lang::Rust)
     }
 
     fn repo(config: &str) -> MiniRepo {

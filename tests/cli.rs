@@ -51,6 +51,48 @@ fn help_names_the_verdict_vocabulary() {
     assert!(output.status.success());
     assert!(stdout(&output).contains("SHIP-READY"));
     assert!(stdout(&output).contains("--path"));
+    assert!(stdout(&output).contains("--lang"));
+}
+
+#[test]
+fn the_language_module_is_inferred_from_the_environment() {
+    let repo = mini_repo();
+
+    let output = run(repo.path(), &["--list-targets"]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout(&output).contains("workspace"));
+
+    let bare = tempfile::tempdir().expect("temp dir");
+    let output = run(bare.path(), &["--list-targets"]);
+    let errors = String::from_utf8_lossy(&output.stderr).to_string();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        errors.contains("no language module recognizes this repo"),
+        "{errors}"
+    );
+    assert!(errors.contains("--lang rust"), "{errors}");
+}
+
+#[test]
+fn the_language_flag_forces_a_module_inference_cannot_pick() {
+    let bare = tempfile::tempdir().expect("temp dir");
+
+    let output = run(bare.path(), &["--lang", "rust", "--list-targets"]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout(&output).contains("workspace"));
+}
+
+#[test]
+fn an_unknown_language_is_a_usage_error() {
+    let output = Command::new(binary())
+        .args(["--lang", "python"])
+        .output()
+        .expect("the binary runs");
+
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]

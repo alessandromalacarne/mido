@@ -7,6 +7,7 @@ fn dev_runs_the_argv_directly_when_cargo_is_on_path() {
 
     let outcome = dev(
         &runner,
+        "cargo",
         Path::new("/repo/frontend"),
         &["cargo".to_string(), "test".to_string()],
         None,
@@ -26,7 +27,13 @@ fn dev_runs_the_argv_directly_when_cargo_is_on_path() {
 fn dev_falls_back_to_the_nix_shell_without_cargo() {
     let runner = FakeRunner::with(&[("nix develop", 0, "")]).tool("tokei");
 
-    dev(&runner, Path::new("/repo"), &["tokei".to_string()], None);
+    dev(
+        &runner,
+        "cargo",
+        Path::new("/repo"),
+        &["tokei".to_string()],
+        None,
+    );
 
     let calls = runner.calls.borrow();
     let call = calls.first().expect("one call");
@@ -41,7 +48,13 @@ fn dev_falls_back_to_the_nix_shell_without_cargo() {
 fn dev_keeps_the_runner_streams_when_the_capture_files_are_gone() {
     let runner = FakeRunner::with(&[("nix develop", 7, "tool output")]).tool("tokei");
 
-    let outcome = dev(&runner, Path::new("/repo"), &["tokei".to_string()], None);
+    let outcome = dev(
+        &runner,
+        "cargo",
+        Path::new("/repo"),
+        &["tokei".to_string()],
+        None,
+    );
 
     assert_eq!(outcome.code, 7);
     assert_eq!(outcome.stdout, "tool output");

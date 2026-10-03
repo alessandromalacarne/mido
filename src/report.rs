@@ -209,6 +209,8 @@ pub struct BannerContext<'a> {
     pub changed: &'a [String],
     pub selected_how: &'a str,
     pub runner: &'a str,
+    pub source_label: &'a str,
+    pub source_count: usize,
 }
 
 pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style) -> String {
@@ -221,11 +223,6 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
             format!(" [{}]", context.selected_how)
         }
     );
-    let rust = context
-        .changed
-        .iter()
-        .filter(|path| path.ends_with(".rs"))
-        .count();
     let mut rows = vec![
         field("target", &named),
         if context.base.is_empty() {
@@ -237,7 +234,12 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
         field("dirty", short(or_unknown(context.dirty))),
         field(
             "changed",
-            &format!("{} files ({rust} rust)", context.changed.len()),
+            &format!(
+                "{} files ({} {})",
+                context.changed.len(),
+                context.source_count,
+                context.source_label
+            ),
         ),
     ];
     if !context.runner.is_empty() {
@@ -403,14 +405,11 @@ pub struct ReportContext<'a> {
     pub dirty: &'a str,
     pub changed: &'a [String],
     pub runner: &'a str,
+    pub source_label: &'a str,
+    pub source_count: usize,
 }
 
 pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_>) -> String {
-    let rust = context
-        .changed
-        .iter()
-        .filter(|path| path.ends_with(".rs"))
-        .count();
     let mut lines = vec![
         format!("# Guardrails report — {}", context.target.name),
         String::new(),
@@ -428,8 +427,10 @@ pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_
         lines.push(format!("runner: `{}`", context.runner));
     }
     lines.push(format!(
-        "changed files: {} ({rust} rust)",
-        context.changed.len()
+        "changed files: {} ({} {})",
+        context.changed.len(),
+        context.source_count,
+        context.source_label
     ));
     lines.push(String::new());
     lines.push("| Gate | Status | Evidence |".to_string());

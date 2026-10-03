@@ -1,48 +1,44 @@
 //! Gate 1 — formatter, linter, type checker.
 
 use crate::config::Config;
-use crate::gates::diagnostics::{dedupe_problems, diagnostic_step, format_step, StepOutcome};
-use crate::gates::fix_hints;
+use crate::gates::{fix_hints, GateRun};
+use crate::lang::{Lang, StepOutcome};
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, PASS};
 use crate::targets::Target;
-use std::path::Path;
 
 /// The steps this target runs: an explicit `[syntax] command` first, then
 /// format, lint and typecheck.
-pub fn syntax_steps(config: &Config, target: &Target) -> Vec<(String, Vec<String>)> {
+pub fn syntax_steps(config: &Config, target: &Target, lang: Lang) -> Vec<(String, Vec<String>)> {
     let mut steps = Vec::new();
 
     if let Some(configured) = config.argv("syntax", "command", target) {
         steps.push(("command".to_string(), configured));
     }
 
-    let defaults: [(&str, &str, &[&str]); 3] = [
-        ("format", "format", &["cargo", "fmt", "--check"]),
-        (
-            "lint",
-            "lint",
-            &["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
-        ),
-        ("typecheck", "typecheck", &["cargo", "check"]),
-    ];
-    for (name, key, default) in defaults {
+    for (name, key) in [
+        ("format", "format"),
+        ("lint", "lint"),
+        ("typecheck", "typecheck"),
+    ] {
         let argv = config
             .argv("syntax", key, target)
-            .unwrap_or_else(|| default.iter().map(|arg| (*arg).to_string()).collect());
-        steps.push((name.to_string(), argv));
+            .or_else(|| lang.fallback_argv("syntax", key));
+        if let Some(argv) = argv {
+            steps.push((name.to_string(), argv));
+        }
     }
     steps
 }
 
-pub fn gate_syntax(
-    runner: &dyn Runner,
-    repo: &Path,
-    target: &Target,
-    changed: &[String],
-    config: &Config,
-) -> GateResult {
-    let steps = syntax_steps(config, target);
+pub fn gate_syntax(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
+    let GateRun {
+        target,
+        config,
+        lang,
+        ..
+    } = *run;
+    let steps = syntax_steps(config, target, lang);
     let contract = format!(
         "{} [syntax] {}",
         config.source(),
@@ -61,32 +57,39 @@ pub fn gate_syntax(
     let mut crate_wide_debt = false;
 
     for (name, argv) in &steps {
-        let outcome = run_step(runner, repo, target, changed, name, argv, timeout);
+        let outcome = run_step(runner, run, name, argv, timeout);
         details.extend(outcome.details);
         problems.extend(outcome.problems);
         crate_wide_debt = crate_wide_debt || outcome.crate_wide_debt;
     }
 
-    syntax_result(contract, crate_wide_debt, details, problems)
+    syntax_result(contract, crate_wide_debt, details, problems, lang)
 }
 
 fn run_step(
     runner: &dyn Runner,
-    repo: &Path,
-    target: &Target,
-    changed: &[String],
+    run: &GateRun<'_>,
     name: &str,
     argv: &[String],
     timeout: u64,
 ) -> StepOutcome {
-    let result = process::dev(runner, &target.dir(repo), argv, Some(timeout));
+    let GateRun {
+        repo,
+        target,
+        changed,
+        lang,
+        ..
+    } = *run;
+    let result = process::dev(
+        runner,
+        lang.env_tool(),
+        &target.dir(repo),
+        argv,
+        Some(timeout),
+    );
     let output = result.combined();
 
-    if name == "format" {
-        format_step(&output, changed)
-    } else {
-        diagnostic_step(name, &argv.join(" "), &output, result.code, changed)
-    }
+    lang.syntax_outcome(name, &argv.join(" "), &output, result.code, changed)
 }
 
 fn syntax_result(
@@ -94,9 +97,10 @@ fn syntax_result(
     crate_wide_debt: bool,
     details: Vec<String>,
     problems: Vec<String>,
+    lang: Lang,
 ) -> GateResult {
     // clippy and `cargo check` report the same diagnostics; count each once.
-    let problems = dedupe_problems(&problems);
+    let problems = lang.dedupe_problems(&problems);
     let evidence: Vec<String> = details
         .into_iter()
         .chain(problems.iter().cloned())
@@ -124,6 +128,7 @@ fn syntax_result(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::lang::Lang;
     use crate::test_support::{FakeRunner, MiniRepo};
 
     fn repo() -> MiniRepo {
@@ -131,7 +136,16 @@ mod tests {
     }
 
     fn config_for(repo: &MiniRepo) -> Config {
-        Config::load(&repo.root).expect("config loads")
+        Config::load(&repo.root, &Lang::Rust).expect("config loads")
+    }
+
+    fn gate_run_for<'a>(
+        repo: &'a MiniRepo,
+        config: &'a Config,
+        changed: &'a [String],
+    ) -> GateRun<'a> {
+        let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
+        crate::test_support::gate_run(&repo.root, target, config, changed)
     }
 
     fn argv(items: &[&str]) -> Vec<String> {
@@ -142,16 +156,25 @@ mod tests {
     fn default_steps_are_format_lint_and_typecheck() {
         let repo = repo();
         let config = config_for(&repo);
-        let target = Target::workspace_target();
+        let target = Target::workspace_target("Cargo.toml");
 
-        let steps = syntax_steps(&config, &target);
+        let steps = syntax_steps(&config, &target, Lang::Rust);
         let names: Vec<&str> = steps.iter().map(|(name, _)| name.as_str()).collect();
 
         assert_eq!(names, vec!["format", "lint", "typecheck"]);
         assert_eq!(steps[0].1, argv(&["cargo", "fmt", "--check"]));
         assert_eq!(
             steps[1].1,
-            argv(&["cargo", "clippy", "--all-targets", "--", "-D", "warnings"])
+            argv(&[
+                "cargo",
+                "clippy",
+                "--all-targets",
+                "--all-features",
+                "--",
+                "-D",
+                "warnings"
+            ]),
+            "the embedded baseline carries the repo's own clippy flags"
         );
         assert_eq!(steps[2].1, argv(&["cargo", "check"]));
     }
@@ -167,9 +190,9 @@ mod tests {
         ",
         ));
         let config = config_for(&repo);
-        let target = Target::workspace_target();
+        let target = Target::workspace_target("Cargo.toml");
 
-        let steps = syntax_steps(&config, &target);
+        let steps = syntax_steps(&config, &target, Lang::Rust);
 
         assert_eq!(steps[0].0, "command");
         assert_eq!(steps[0].1, argv(&["cargo", "build"]));
@@ -183,13 +206,8 @@ mod tests {
         let runner = FakeRunner::with(&[("clippy", 1, clippy), ("fmt", 0, ""), ("check", 0, "")])
             .tool("cargo");
 
-        let result = gate_syntax(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["src/components/foo.rs".to_string()],
-            &config_for(&repo),
-        );
+        let changed = vec!["src/components/foo.rs".to_string()];
+        let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.name, "syntax");
         assert_eq!(result.status, FAIL);
@@ -208,13 +226,8 @@ mod tests {
             FakeRunner::with(&[("clippy", 1, clippy), ("fmt", 0, ""), ("check", 1, check)])
                 .tool("cargo");
 
-        let result = gate_syntax(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["src/foo.rs".to_string()],
-            &config_for(&repo),
-        );
+        let changed = vec!["src/foo.rs".to_string()];
+        let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.status, FAIL);
         assert_eq!(
@@ -234,13 +247,8 @@ mod tests {
         let runner = FakeRunner::with(&[("clippy", 1, clippy), ("fmt", 0, ""), ("check", 0, "")])
             .tool("cargo");
 
-        let result = gate_syntax(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["lib/src/lib.rs".to_string()],
-            &config_for(&repo),
-        );
+        let changed = vec!["lib/src/lib.rs".to_string()];
+        let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.status, PASS);
         assert!(result.summary.contains("pre-existing"));
@@ -260,13 +268,8 @@ mod tests {
         ])
         .tool("cargo");
 
-        let result = gate_syntax(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &["src/foo.rs".to_string()],
-            &config_for(&repo),
-        );
+        let changed = vec!["src/foo.rs".to_string()];
+        let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
 
         assert_eq!(result.status, FAIL);
         assert!(result.details.join(" ").contains("cannot attribute"));
@@ -277,13 +280,7 @@ mod tests {
         let repo = MiniRepo::build(Some("version = 1\n"));
         let runner = FakeRunner::default().tool("cargo");
 
-        let result = gate_syntax(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(),
-            &[],
-            &config_for(&repo),
-        );
+        let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
 
         assert!(result.contract.contains("`.mido.toml` [syntax]"));
         assert!(result.contract.contains("format=`cargo fmt --check`"));

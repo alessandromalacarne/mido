@@ -214,11 +214,21 @@ fn exit_status(status: std::process::ExitStatus) -> i32 {
 
 /// Run a command with `workdir` as its directory, inside the dev shell when needed.
 ///
+/// The language module names the binary (`probe_tool`) whose presence means the
+/// environment already carries the gate tools; when it is missing the command
+/// runs through `nix develop -c …`.
+///
 /// `nix develop` prints its shellHook and flake notices on stderr before the
 /// tool runs, so its streams are captured in files rather than pipes — stdout
 /// stays the tool's own, which is what every json payload the gates parse needs.
-pub fn dev(runner: &dyn Runner, workdir: &Path, args: &[String], timeout: Option<u64>) -> Outcome {
-    if runner.has("cargo") {
+pub fn dev(
+    runner: &dyn Runner,
+    probe_tool: &str,
+    workdir: &Path,
+    args: &[String],
+    timeout: Option<u64>,
+) -> Outcome {
+    if runner.has(probe_tool) {
         return runner.exec(&Command::new(workdir, args.to_vec()).timeout(timeout));
     }
 
