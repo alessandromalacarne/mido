@@ -3,12 +3,10 @@ use crate::config::validate::validate_config;
 use std::path::Path;
 
 #[test]
-fn embedded_defaults_match_the_repo_config_minus_script() {
+fn embedded_defaults_match_the_repo_config() {
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/.mido.toml"))
         .expect(".mido.toml is there");
-    let mut repo: toml::Table = text.parse().expect(".mido.toml parses");
-
-    repo.remove("script");
+    let repo: toml::Table = text.parse().expect(".mido.toml parses");
 
     assert_eq!(
         *default_config(),
