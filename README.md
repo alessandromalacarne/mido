@@ -119,7 +119,6 @@ verdict panel closes it.
 │ revision febf29d1                                   │
 │ dirty    bddc06f7                                   │
 │ changed  1 files (1 rust)                           │
-│ runner   src/main.rs (declared by .mido.toml) │
 ╰─────────────────────────────────────────────────────╯
   src/style.rs
 
@@ -274,7 +273,7 @@ files listed so the reason is visible.
 ## Configuration
 
 `.mido.toml` is the tool contract. Rust also ships a built-in baseline — the
-same document minus `script`, embedded as `src/lang/rust/defaults.toml` — so a
+same contract, embedded as `src/lang/rust/defaults.toml` — so a
 cargo project with no config still gets the commands and thresholds below. The
 file overrides the baseline key by key; standalone (excluded) crates never
 inherit root commands and fall back to the module's bare `cargo` commands
@@ -284,7 +283,6 @@ Example, mirroring this repo's own:
 
 ```toml
 version = 1
-script  = "src/main.rs"        # optional: the runner this ladder belongs to
 
 [syntax]
 format    = ["cargo", "fmt", "--check"]

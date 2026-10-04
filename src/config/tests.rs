@@ -257,61 +257,18 @@ fn target_section_wins_over_the_root_command() {
 }
 
 #[test]
-fn script_key_names_the_declared_runner() {
+fn script_is_no_longer_a_config_key() {
     let repo = repo(
         "
             version = 1
-            script = \"scripts/guardrails.py\"
-        ",
-    );
-    std::fs::write(
-        repo.root.join("scripts/guardrails.py"),
-        "# the ladder runner\n",
-    )
-    .expect("runner");
-
-    assert_eq!(
-        load(&repo).expect("config loads").script().as_deref(),
-        Some("scripts/guardrails.py")
-    );
-}
-
-#[test]
-fn script_key_is_optional() {
-    let repo = repo("version = 1\n");
-
-    assert_eq!(load(&repo).expect("config loads").script(), None);
-}
-
-#[test]
-fn script_key_pointing_at_a_missing_file_is_a_config_error() {
-    let repo = repo(
-        "
-            version = 1
-            script = \"scripts/ghost.py\"
+            script = \"Cargo.toml\"
         ",
     );
 
-    let message = load(&repo).expect_err("config is rejected").render();
+    let message = load(&repo).expect_err("script is rejected").render();
 
-    assert!(message.contains("script"));
-    assert!(message.contains("scripts/ghost.py"));
-    assert!(message.contains("line 3"));
-}
-
-#[test]
-fn script_key_must_be_a_string() {
-    let repo = repo(
-        "
-            version = 1
-            script = 3
-        ",
-    );
-
-    assert!(load(&repo)
-        .expect_err("config is rejected")
-        .render()
-        .contains("script"));
+    assert!(message.contains("unknown key `script`"), "{message}");
+    assert!(message.contains("top level accepts"), "{message}");
 }
 
 #[test]

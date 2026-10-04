@@ -1,6 +1,5 @@
 # .mido.toml — guardrails gate configuration
 version = 1
-script = "src/main.rs"
 
 [syntax]
 format    = ["cargo", "fmt", "--check"]

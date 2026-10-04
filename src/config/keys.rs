@@ -4,7 +4,7 @@ pub const GATES: [&str; 6] = [
     "syntax", "size", "analysis", "tests", "coverage", "mutation",
 ];
 
-pub const EXTRA_TOP_LEVEL_KEYS: [&str; 3] = ["version", "targets", "script"];
+pub const EXTRA_TOP_LEVEL_KEYS: [&str; 2] = ["version", "targets"];
 pub const FAILURE_KEYS: [&str; 1] = ["max_attempts_per_gate"];
 pub const TARGET_KEYS: [&str; 3] = ["path", "scope", "manifest"];
 pub const THRESHOLD_KEYS: [&str; 2] = ["warn", "fail"];
@@ -95,7 +95,6 @@ mod tests {
     fn top_level_keys_are_the_sections_plus_the_scalars() {
         let keys = top_level_keys();
 
-        assert!(keys.contains("script"));
         assert!(keys.contains("targets"));
         assert!(keys.contains("version"));
         assert!(keys.contains("syntax"));

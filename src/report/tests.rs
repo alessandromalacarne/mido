@@ -190,7 +190,6 @@ fn banner_reports_the_revision_it_measured() {
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
             selected_how: "",
-            runner: "",
             source_label: "rust",
             source_count: 1,
         },
@@ -213,7 +212,6 @@ fn the_banner_is_a_panel_of_labelled_fields() {
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
             selected_how: "auto",
-            runner: "scripts/guardrails.py",
             source_label: "rust",
             source_count: 1,
         },
@@ -228,10 +226,6 @@ fn the_banner_is_a_panel_of_labelled_fields() {
     assert!(banner.contains("│ base     origin/mvp"), "{banner}");
     assert!(banner.contains("│ revision fa5bac38"), "{banner}");
     assert!(banner.contains("│ changed  1 files (1 rust)"), "{banner}");
-    assert!(
-        banner.contains("script"),
-        "the runner row keeps the declaration note"
-    );
     assert!(banner.ends_with("lib/src/foo.rs"), "files follow the panel");
 }
 
@@ -288,27 +282,6 @@ fn the_panels_shorten_the_hashes_for_the_eye() {
         failure.contains("fa5bac38") && !failure.contains("fa5bac380"),
         "{failure}"
     );
-}
-
-#[test]
-fn banner_names_the_runner_the_config_declares() {
-    let banner = render_banner(
-        &Target::workspace_target("Cargo.toml"),
-        &BannerContext {
-            base: "origin/mvp",
-            revision: "fa5bac38",
-            dirty: "abc123",
-            changed: &["lib/src/foo.rs".to_string()],
-            selected_how: "auto",
-            runner: "scripts/guardrails.py",
-            source_label: "rust",
-            source_count: 1,
-        },
-        Style::plain(),
-    );
-
-    assert!(banner.contains("scripts/guardrails.py"));
-    assert!(banner.contains("[auto]"));
 }
 
 #[test]
@@ -381,7 +354,6 @@ fn the_report_spells_out_the_fix_for_a_failing_gate() {
             revision: "fa5bac38",
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
-            runner: "",
             source_label: "rust",
             source_count: 1,
         },
@@ -391,32 +363,6 @@ fn the_report_spells_out_the_fix_for_a_failing_gate() {
     assert!(report.contains("- split `create_task` along a real seam"));
     assert!(report.contains("| size | FAIL | 2 functions over the ceiling |"));
     assert!(report.contains("contract: `.mido.toml` [size] file_loc.fail = 500"));
-}
-
-#[test]
-fn report_records_the_runner_the_config_declares() {
-    let report = render_report_markdown(
-        &[GateResult::new(
-            "tests",
-            PASS,
-            "1 passed",
-            Vec::<String>::new(),
-        )],
-        &ReportContext {
-            target: &Target::workspace_target("Cargo.toml"),
-            base: "origin/mvp",
-            revision: "fa5bac38",
-            dirty: "abc123",
-            changed: &["lib/src/foo.rs".to_string()],
-            runner: "scripts/guardrails.py",
-            source_label: "rust",
-            source_count: 1,
-        },
-    );
-
-    assert!(report.contains("runner: `scripts/guardrails.py`"));
-    assert!(report.contains("| tests | PASS | 1 passed |"));
-    assert!(report.contains("VERDICT: SHIP-READY"));
 }
 
 #[test]
@@ -434,7 +380,6 @@ fn a_report_without_a_base_names_the_explicit_paths() {
             revision: "fa5bac38",
             dirty: "abc123",
             changed: &["lib/src/foo.rs".to_string()],
-            runner: "",
             source_label: "rust",
             source_count: 1,
         },

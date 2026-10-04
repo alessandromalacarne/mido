@@ -78,7 +78,6 @@ impl Config {
         })?;
 
         validate::validate_config(&data, &text, &path)?;
-        validate::validate_script_entry(&data, &text, &path, repo)?;
 
         let warnings = if data.contains_key("version") {
             Vec::new()
@@ -113,14 +112,6 @@ impl Config {
             ),
             None => format!("{} built-in defaults", self.lang_name),
         }
-    }
-
-    /// The runner `.mido.toml` declares, if it declares one.
-    pub fn script(&self) -> Option<String> {
-        self.data
-            .get("script")
-            .and_then(value::as_str)
-            .map(str::to_string)
     }
 
     pub fn target_table(&self, name: &str) -> Option<&Table> {

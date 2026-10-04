@@ -25,8 +25,7 @@ pub fn no_targets_error(repo: &std::path::Path) -> crate::error::GuardrailsError
         .hint("the ladder measures cargo targets; run it from the repo root")
 }
 
-/// The embedded baseline, as text — the same document as the repo's `.mido.toml`
-/// minus the repo-specific `script` key.
+/// The embedded baseline, as text — the same document as the repo's `.mido.toml`.
 pub const DEFAULTS: &str = include_str!("defaults.toml");
 
 /// The rust baseline the ladder runs when `.mido.toml` is silent (or absent).

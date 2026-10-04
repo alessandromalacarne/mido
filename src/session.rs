@@ -283,7 +283,6 @@ pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult
             revision: &session.revision,
             dirty: &session.dirty,
             changed: &changed,
-            runner: session.config.script().as_deref().unwrap_or_default(),
             source_label: session.lang.source_label(),
             source_count: changed
                 .iter()
@@ -394,7 +393,6 @@ fn target_banner(session: &Session, target: &Target, scoped: &[String], style: S
             dirty: &session.dirty,
             changed: scoped,
             selected_how: &session.selection,
-            runner: session.config.script().as_deref().unwrap_or_default(),
             source_label: session.lang.source_label(),
             source_count,
         },
