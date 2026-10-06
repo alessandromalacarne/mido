@@ -157,7 +157,7 @@ With Nix (the dev shell brings every gate tool along):
 
 ```sh
 nix build          # the binary
-nix develop        # cargo, rustfmt, clippy, tokei, rust-code-analysis, cargo-llvm-cov, cargo-mutants
+nix develop        # cargo, rustfmt, clippy, tokei, rust-code-analysis, cargo-llvm-cov, cargo-mutants, cargo-nextest
 ```
 
 With cargo:
@@ -311,8 +311,8 @@ changed_file_min = 80   # percent line coverage for changed files with new logic
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
-command       = ["cargo", "mutants"]
-scope         = "changed"      # "changed" | path | glob
+command       = ["cargo", "mutants", "--iterate", "-j2"]
+scope         = "changed"      # "changed" | "all" | a literal path
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 
@@ -337,6 +337,13 @@ Notes:
   written for the workspace root does not break a wasm crate.
 - Unknown keys, wrong types and malformed commands are config errors on purpose,
   so a typo cannot silently disable a gate or move a threshold.
+- For mutation speed, the recommended setup (shipped by this repo) is a
+  `[profile.mutants]` inheriting `test` with `debug = "none"` in `Cargo.toml`,
+  a `.cargo/mutants.toml` with `test_tool = "nextest"` and
+  `profile = "mutants"`, and `--iterate -j2` on the command: caught mutants
+  from the previous run are skipped, the rest run two at a time. `--iterate`
+  trusts earlier caught mutants — the gate counts them as killed and says so
+  in the evidence line.
 
 ## Reports
 
@@ -402,15 +409,16 @@ and the six gates are run against the diff before handoff.
 | Module | Role |
 |--------|------|
 | `src/cli.rs` | the argv surface and exit codes |
+| `src/gate.rs` | the gate vocabulary: names, order, fix hints — the one gate list |
 | `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
 | `src/lang/` | language modules: the rust module's embedded defaults, parsers, targets and workspace aid |
-| `src/session.rs` | one run: what is measured, in what order, what is printed |
-| `src/targets.rs` | target scoping, path lists and diff ownership |
+| `src/session.rs` | one run: what is measured, in what order, what is printed (`session/{setup,output}.rs`) |
+| `src/targets.rs` | target scoping, path lists and diff ownership (`targets/paths.rs`) |
 | `src/config/` | `.mido.toml` loading, validation and defaults |
 | `src/gates/` | the six gates and their reporting |
-| `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report |
+| `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report (`report/{panel,views,markdown}.rs`) |
 | `src/style.rs` | the styling vocabulary: colour, glyphs, terminal detection |
-| `src/process.rs` | process execution, git queries, `nix develop` fallback |
+| `src/process.rs` | process execution, git queries, `nix develop` fallback (`process/git.rs`) |
 
 ## License
 

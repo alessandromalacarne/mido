@@ -421,14 +421,14 @@ the line; mutation testing says the tests would notice if the line were wrong.
 
 | Stack | Command |
 | --- | --- |
-| Rust | `cargo mutants --in-place` (scoped: `--file src/changed.rs`) |
+| Rust | `cargo mutants` (scoped: `--file src/changed.rs`; parallel: `-j2`, not with `--in-place`) |
 | TS/JS | `npx stryker run` with `mutate` scoped to changed files |
 | Python | `mutmut run --paths-to-mutate src/changed_module.py` |
 | Go | `gremlins unleash ./changed/pkg` |
 
-`.mido.toml` `[mutation]` declares `command`, `scope` (`"changed"` | path |
-glob), `timeout_secs` and `kill_rate_min`; the changed scope writes the
-working-tree patch and scopes mutants to it, explicit paths scope the named
+`.mido.toml` `[mutation]` declares `command`, `scope` (`"changed"` | `"all"` |
+a literal path), `timeout_secs` and `kill_rate_min`; the changed scope writes
+the working-tree patch and scopes mutants to it, explicit paths scope the named
 files.
 
 This gate is slow — minutes to hours — so:
