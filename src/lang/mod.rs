@@ -16,6 +16,9 @@ pub enum Lang {
     Rust,
 }
 
+/// Every module this build knows; inference and `--lang` pick from this list.
+pub const LANGS: [Lang; 1] = [Lang::Rust];
+
 /// What one syntax step made of its output.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StepOutcome {
@@ -60,7 +63,14 @@ impl Lang {
         Err(
             GuardrailsError::setup("no language module recognizes this repo")
                 .detail(format!("looked for {}", manifest.display()))
-                .detail("known languages: rust")
+                .detail(format!(
+                    "known languages: {}",
+                    LANGS
+                        .iter()
+                        .map(|lang| lang.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
                 .hint("pass --lang rust to force a module, or run against a project it knows"),
         )
     }
@@ -127,10 +137,32 @@ impl Lang {
         }
     }
 
-    /// The `[analysis] tool` this module can actually drive.
-    pub fn analysis_supported_tool(self) -> &'static str {
+    /// The code lines per file the size gate judges.
+    pub fn code_lines(
+        self,
+        runner: &dyn crate::process::Runner,
+        repo: &Path,
+        target: &crate::targets::Target,
+        files: &[String],
+        tool: &str,
+        on_error: &mut Vec<String>,
+    ) -> std::collections::BTreeMap<String, i64> {
         match self {
-            Lang::Rust => "rust-code-analysis",
+            Lang::Rust => rust::size::code_lines(runner, repo, target, files, tool, on_error),
+        }
+    }
+
+    /// The `[size] tool` this module drives by default.
+    pub fn size_tool(self) -> &'static str {
+        match self {
+            Lang::Rust => rust::size::TOOL,
+        }
+    }
+
+    /// The tool that produces the function metrics both size and analysis judge.
+    pub fn metrics_tool(self) -> &'static str {
+        match self {
+            Lang::Rust => rust::METRICS_TOOL,
         }
     }
 
@@ -202,7 +234,7 @@ impl Lang {
         repo: &Path,
         target: &crate::targets::Target,
         scoped: MutationScope<'_>,
-    ) -> Result<Vec<String>, std::io::Error> {
+    ) -> Result<Vec<String>, GuardrailsError> {
         match self {
             Lang::Rust => rust::mutation::scope_args(runner, repo, target, scoped),
         }

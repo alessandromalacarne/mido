@@ -16,35 +16,43 @@ pub fn analysis_units(
     let mut units = Vec::new();
 
     for path in files {
-        let args: Vec<String> = [
-            "rust-code-analysis-cli",
-            "-m",
-            "--pr",
-            "-O",
-            "json",
-            "-p",
-            path,
-        ]
-        .iter()
-        .map(|arg| arg.to_string())
-        .collect();
-        let result = process::dev(runner, super::ENV_TOOL, &target.dir(repo), &args, None);
-        if !result.ok() || result.stdout.trim().is_empty() {
-            on_error.push(format!(
-                "{path}: rust-code-analysis could not read it (exit {})",
-                result.code
-            ));
-            continue;
-        }
-
-        match serde_json::from_str(&result.stdout) {
+        match measure_one(runner, repo, target, path) {
             Ok(document) => units.extend(units_from_document(path, &document)),
-            Err(error) => on_error.push(format!(
-                "{path}: rust-code-analysis printed no usable json ({error})"
-            )),
+            Err(message) => on_error.push(message),
         }
     }
     units
+}
+
+/// One file's metrics document, or the error line for the gate's evidence.
+fn measure_one(
+    runner: &dyn Runner,
+    repo: &Path,
+    target: &Target,
+    path: &str,
+) -> Result<Json, String> {
+    let args: Vec<String> = [
+        "rust-code-analysis-cli",
+        "-m",
+        "--pr",
+        "-O",
+        "json",
+        "-p",
+        path,
+    ]
+    .iter()
+    .map(|arg| arg.to_string())
+    .collect();
+    let result = process::dev(runner, super::ENV_TOOL, &target.dir(repo), &args, None);
+    if !result.ok() || result.stdout.trim().is_empty() {
+        return Err(format!(
+            "{path}: rust-code-analysis could not read it (exit {})",
+            result.code
+        ));
+    }
+
+    serde_json::from_str(&result.stdout)
+        .map_err(|error| format!("{path}: rust-code-analysis printed no usable json ({error})"))
 }
 
 /// Every function/metric in one rust-code-analysis document, at any depth.

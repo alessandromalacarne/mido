@@ -77,25 +77,11 @@ fn diagnostic_step(
     returncode: i32,
     changed: &[String],
 ) -> StepOutcome {
-    let mut in_scope: Vec<String> = diagnostic_pattern()
-        .captures_iter(output)
-        .map(|captures| captures[1].to_string())
-        .filter(|path| touches(path, changed))
-        .collect();
-    in_scope.sort();
-    in_scope.dedup();
+    let in_scope = in_scope_files(output, changed);
     let diagnostics = diagnostic_pattern().captures_iter(output).count();
 
     let mut outcome = StepOutcome {
-        details: vec![format!(
-            "{name}: {diagnostics} diagnostic(s), {} of them in changed files{}",
-            in_scope.len(),
-            if in_scope.is_empty() {
-                String::new()
-            } else {
-                format!(" -> {}", in_scope.join(", "))
-            }
-        )],
+        details: vec![attribution_line(name, diagnostics, &in_scope)],
         crate_wide_debt: diagnostics > in_scope.len(),
         problems: Vec::new(),
     };
@@ -112,13 +98,32 @@ fn diagnostic_step(
     outcome
 }
 
+/// The diagnostic locations that land in the changed files, deduped.
+fn in_scope_files(output: &str, changed: &[String]) -> Vec<String> {
+    let mut files: Vec<String> = diagnostic_pattern()
+        .captures_iter(output)
+        .map(|captures| captures[1].to_string())
+        .filter(|path| touches(path, changed))
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn attribution_line(name: &str, diagnostics: usize, in_scope: &[String]) -> String {
+    let located = if in_scope.is_empty() {
+        String::new()
+    } else {
+        format!(" -> {}", in_scope.join(", "))
+    };
+    format!(
+        "{name}: {diagnostics} diagnostic(s), {} of them in changed files{located}",
+        in_scope.len()
+    )
+}
+
 fn unattributable_lines(name: &str, output: &str) -> Vec<String> {
-    let lines: Vec<&str> = output.trim().lines().collect();
-    let start = lines.len().saturating_sub(10);
-    lines[start..]
-        .iter()
-        .map(|line| format!("{name}: {}", line.trim()))
-        .collect()
+    crate::process::last_lines_with(output, 10, &format!("{name}: "))
 }
 
 /// `path:line:col` plus the message, with the severity folded away.

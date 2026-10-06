@@ -1,9 +1,6 @@
-//! Readings the gates judge: function units, size counts and lcov reports.
+//! Readings the gates judge: function units and lcov reports.
 
-use crate::lang::Lang;
-use crate::process::{self, Runner};
 use crate::targets::Target;
-use serde_json::Value as Json;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -105,176 +102,12 @@ pub fn touches(diagnostic_path: &str, changed: &[String]) -> bool {
         .any(|path| diagnostic_path.ends_with(path.as_str()) || path.ends_with(diagnostic_path))
 }
 
-/// Code lines per file, as tokei reports them; measurement failures land in
-/// `on_error` and measure nothing — a missing reading is never a zero.
-pub fn tokei_code_lines(
-    runner: &dyn Runner,
-    repo: &Path,
-    target: &Target,
-    files: &[String],
-    tool: &str,
-    lang: Lang,
-    on_error: &mut Vec<String>,
-) -> BTreeMap<String, i64> {
-    if files.is_empty() {
-        return BTreeMap::new();
-    }
-    if tool != "tokei" {
-        on_error.push(format!(
-            "size tool `{tool}` is not supported by this runner (only tokei)"
-        ));
-        return BTreeMap::new();
-    }
-
-    let args: Vec<String> = ["tokei", "--output", "json"]
-        .iter()
-        .map(|arg| arg.to_string())
-        .chain(files.iter().cloned())
-        .collect();
-    let result = process::dev(runner, lang.env_tool(), &target.dir(repo), &args, None);
-    if !result.ok() || result.stdout.trim().is_empty() {
-        on_error.push(format!(
-            "tokei could not measure {} file(s) (exit {})",
-            files.len(),
-            result.code
-        ));
-        return BTreeMap::new();
-    }
-
-    let Ok(document) = serde_json::from_str::<Json>(&result.stdout) else {
-        on_error.push("tokei printed no usable json".to_string());
-        return BTreeMap::new();
-    };
-    tokei_counts(&document)
-}
-
-/// `{language: {reports: [{name, stats: {code}}]}}`, minus the `Total` pseudo-language.
-fn tokei_counts(document: &Json) -> BTreeMap<String, i64> {
-    let mut counts = BTreeMap::new();
-    let Some(languages) = document.as_object() else {
-        return BTreeMap::new();
-    };
-
-    for (language, info) in languages {
-        if language == "Total" {
-            continue;
-        }
-        for report in info
-            .get("reports")
-            .and_then(Json::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-        {
-            let Some(name) = report.get("name").and_then(Json::as_str) else {
-                continue;
-            };
-            let code = report
-                .get("stats")
-                .and_then(|stats| stats.get("code"))
-                .and_then(Json::as_i64)
-                .unwrap_or_default();
-            counts.insert(name.to_string(), code);
-        }
-    }
-    counts
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{FakeRunner, MiniRepo};
 
     fn target() -> Target {
         Target::crate_target("frontend", false, "Cargo.toml")
-    }
-
-    #[test]
-    fn tokei_counts_come_from_the_report() {
-        let repo = MiniRepo::build(None);
-        let tokei = serde_json::json!({
-            "Rust": {
-                "code": 12,
-                "reports": [
-                    { "name": "src/foo.rs", "stats": { "code": 12 } }
-                ]
-            },
-            "Total": { "code": 12, "reports": [{ "name": "Total", "stats": { "code": 12 } }] }
-        });
-        let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-        let mut errors = Vec::new();
-
-        let counts = tokei_code_lines(
-            &runner,
-            &repo.root,
-            &Target::workspace_target("Cargo.toml"),
-            &["src/foo.rs".to_string()],
-            "tokei",
-            Lang::Rust,
-            &mut errors,
-        );
-
-        assert_eq!(counts.get("src/foo.rs"), Some(&12));
-        assert!(!counts.contains_key("Total"));
-        assert!(errors.is_empty());
-    }
-
-    #[test]
-    fn an_unsupported_size_tool_is_an_error_not_a_silent_pass() {
-        let repo = MiniRepo::build(None);
-        let runner = FakeRunner::default();
-        let mut errors = Vec::new();
-
-        let counts = tokei_code_lines(
-            &runner,
-            &repo.root,
-            &Target::workspace_target("Cargo.toml"),
-            &["src/foo.rs".to_string()],
-            "scc",
-            Lang::Rust,
-            &mut errors,
-        );
-
-        assert!(counts.is_empty());
-        assert!(errors[0].contains("`scc` is not supported"));
-    }
-
-    #[test]
-    fn unreadable_tokei_output_is_an_error() {
-        let repo = MiniRepo::build(None);
-        let runner = FakeRunner::with(&[("tokei", 0, "not json")]);
-        let mut errors = Vec::new();
-
-        tokei_code_lines(
-            &runner,
-            &repo.root,
-            &Target::workspace_target("Cargo.toml"),
-            &["src/foo.rs".to_string()],
-            "tokei",
-            Lang::Rust,
-            &mut errors,
-        );
-
-        assert!(errors.iter().any(|error| error.contains("no usable json")));
-    }
-
-    #[test]
-    fn a_failing_tokei_run_is_an_error_even_with_partial_output() {
-        let repo = MiniRepo::build(None);
-        let runner = FakeRunner::with(&[("tokei", 1, "{}")]);
-        let mut errors = Vec::new();
-
-        let counts = tokei_code_lines(
-            &runner,
-            &repo.root,
-            &Target::workspace_target("Cargo.toml"),
-            &["src/foo.rs".to_string()],
-            "tokei",
-            Lang::Rust,
-            &mut errors,
-        );
-
-        assert!(counts.is_empty());
-        assert!(errors[0].contains("could not measure"));
     }
 
     #[test]
