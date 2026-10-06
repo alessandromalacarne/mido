@@ -1,4 +1,4 @@
-use mido::{cli, mcp, process::SystemRunner, style::Style};
+use mido_guard::{cli, mcp, process::SystemRunner, style::Style};
 
 fn main() {
     let args = cli::parse();
