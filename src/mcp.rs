@@ -7,6 +7,9 @@ use crate::process::SystemRunner;
 use crate::style::Style;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 mod tools;
 
@@ -26,6 +29,11 @@ const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
+/// How often a running tool call tells the client it is alive. A client aborts
+/// a call that stays silent through its idle window; a ladder can run long
+/// enough that only these pulses keep it open.
+const HEARTBEAT: Duration = Duration::from_secs(15);
+
 /// The terminal outcome of one mido invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
@@ -35,7 +43,10 @@ pub struct Invocation {
 }
 
 /// Runs a mido command line and captures its streams.
-pub trait Invoke {
+///
+/// `Sync` because a tool call runs on a worker thread while the serve loop
+/// keeps the client posted.
+pub trait Invoke: Sync {
     fn invoke(&self, argv: &[String]) -> Invocation;
 }
 
@@ -78,7 +89,7 @@ pub fn serve_stdio() -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
-    match serve(stdin.lock(), &mut stdout.lock(), &SystemInvoke) {
+    match serve(stdin.lock(), &mut stdout.lock(), &SystemInvoke, HEARTBEAT) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("mido mcp: {error}");
@@ -88,31 +99,65 @@ pub fn serve_stdio() -> i32 {
 }
 
 /// One JSON-RPC message per line in, one per line out.
-fn serve(input: impl BufRead, output: &mut dyn Write, invoke: &dyn Invoke) -> std::io::Result<()> {
+fn serve(
+    input: impl BufRead,
+    output: &mut dyn Write,
+    invoke: &dyn Invoke,
+    heartbeat: Duration,
+) -> std::io::Result<()> {
     for line in input.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        let Some(response) = handle_line(&line, invoke) else {
-            continue;
-        };
-        serde_json::to_writer(&mut *output, &response)?;
-        output.write_all(b"\n")?;
-        output.flush()?;
+        match parse_message(&line) {
+            Ok(message) => serve_message(&message, output, invoke, heartbeat)?,
+            Err(error) => write_message(output, &error)?,
+        }
     }
     Ok(())
 }
 
+/// Answer one parsed message. A tool call carrying a progress token runs on a
+/// worker thread, with a heartbeat on this one until it answers.
+fn serve_message(
+    message: &Value,
+    output: &mut dyn Write,
+    invoke: &dyn Invoke,
+    heartbeat: Duration,
+) -> std::io::Result<()> {
+    let response = match progress_token(message) {
+        Some(token) => {
+            let tool = message
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or("mido");
+            keep_alive(output, heartbeat, tool, &token, || answer(message, invoke))
+        }
+        None => answer(message, invoke),
+    };
+    match response {
+        Some(response) => write_message(output, &response),
+        None => Ok(()),
+    }
+}
+
+/// One line of input as a JSON-RPC message, or the error response it earns.
+fn parse_message(line: &str) -> Result<Value, Value> {
+    serde_json::from_str::<Value>(line)
+        .map_err(|_| error_response(Value::Null, PARSE_ERROR, "the line is not JSON"))
+}
+
 /// Answer one JSON-RPC line; `None` when the message asks for no answer.
 pub fn handle_line(line: &str, invoke: &dyn Invoke) -> Option<Value> {
-    let Ok(message) = serde_json::from_str::<Value>(line) else {
-        return Some(error_response(
-            Value::Null,
-            PARSE_ERROR,
-            "the line is not JSON",
-        ));
-    };
+    match parse_message(line) {
+        Ok(message) => answer(&message, invoke),
+        Err(error) => Some(error),
+    }
+}
+
+/// Answer one parsed message; `None` when the message asks for no answer.
+fn answer(message: &Value, invoke: &dyn Invoke) -> Option<Value> {
     let Some(object) = message.as_object() else {
         return Some(error_response(
             Value::Null,
@@ -120,7 +165,6 @@ pub fn handle_line(line: &str, invoke: &dyn Invoke) -> Option<Value> {
             "a message must be a JSON object",
         ));
     };
-
     let Some(method) = object.get("method").and_then(Value::as_str) else {
         return object
             .get("id")
@@ -139,6 +183,75 @@ pub fn handle_line(line: &str, invoke: &dyn Invoke) -> Option<Value> {
             METHOD_NOT_FOUND,
             &format!("unknown method `{method}`"),
         )),
+    }
+}
+
+/// The progress token a tool call carries when the client wants to be kept
+/// posted; every heartbeat echoes it back.
+fn progress_token(message: &Value) -> Option<Value> {
+    if message.get("method").and_then(Value::as_str) != Some("tools/call") {
+        return None;
+    }
+    match message.pointer("/params/_meta/progressToken") {
+        Some(token) if !token.is_null() => Some(token.clone()),
+        _ => None,
+    }
+}
+
+/// Run `work` on a worker thread and tell the client it is alive every
+/// `heartbeat` until the answer lands. Without the pulses a long call sits
+/// silent, and silence is what clients abort on.
+fn keep_alive<T: Send>(
+    output: &mut dyn Write,
+    heartbeat: Duration,
+    tool: &str,
+    token: &Value,
+    work: impl FnOnce() -> T + Send,
+) -> T {
+    let (sender, receiver) = mpsc::channel();
+    let started = Instant::now();
+
+    thread::scope(|scope| {
+        scope.spawn(move || {
+            let _ = sender.send(work());
+        });
+
+        loop {
+            match receiver.recv_timeout(heartbeat) {
+                Ok(answer) => return answer,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let pulse = progress_notification(token, tool, started.elapsed());
+                    // A channel that broke surfaces when the answer is written.
+                    let _ = write_message(output, &pulse);
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("the tool call worker panicked")
+                }
+            }
+        }
+    })
+}
+
+/// The pulse a running call sends: the token it was handed, how far along it is.
+fn progress_notification(token: &Value, tool: &str, elapsed: Duration) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": {
+            "progressToken": token,
+            "progress": elapsed.as_secs(),
+            "message": format!("{tool}: {} elapsed", elapsed_text(elapsed)),
+        },
+    })
+}
+
+/// How long a call has been running, in seconds or in minutes and seconds.
+fn elapsed_text(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else {
+        format!("{}m{:02}s", seconds / 60, seconds % 60)
     }
 }
 
@@ -176,6 +289,13 @@ fn tool_result(outcome: &Invocation) -> Value {
         "content": [{ "type": "text", "text": text }],
         "isError": outcome.code != 0,
     })
+}
+
+/// One message per line out, flushed so the client reads it now.
+fn write_message(output: &mut dyn Write, message: &Value) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *output, message)?;
+    output.write_all(b"\n")?;
+    output.flush()
 }
 
 /// The handshake: the client's revision when this server speaks it, else the newest.
