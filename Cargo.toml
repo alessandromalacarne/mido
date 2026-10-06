@@ -1,5 +1,5 @@
 [package]
-name = "mido"
+name = "mido-guard"
 version = "0.1.0"
 edition = "2021"
 description = "Guardrails runner: the six-gate verification ladder described by .mido.toml"
