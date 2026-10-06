@@ -234,6 +234,40 @@ mod tests {
     }
 
     #[test]
+    fn the_member_patch_is_filtered_without_rewriting_the_paths() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[(
+            "git diff",
+            0,
+            "diff --git a/frontend/src/foo.rs b/frontend/src/foo.rs\n",
+        )]);
+        let scratch = scratch(&repo);
+
+        scope_args(
+            &runner,
+            &repo.root,
+            &Target::crate_target("frontend", true, crate::lang::rust::MANIFEST),
+            MutationScope {
+                configured: "changed",
+                scope: Scope::Diff,
+                changed: &[],
+                patch: &scratch.join("patch"),
+            },
+        )
+        .expect("patch written");
+
+        assert!(
+            runner.called_with("git diff -- frontend"),
+            "the pathspec scopes the patch without rewriting its paths"
+        );
+        assert!(
+            !runner.called_with("--relative"),
+            "the patch must stay relative to the cargo workspace root: that is \
+             the root cargo-mutants resolves --in-diff paths against"
+        );
+    }
+
+    #[test]
     fn untracked_rust_files_are_added_to_the_index_and_then_released() {
         let repo = repo();
         let runner = FakeRunner {
@@ -267,6 +301,6 @@ mod tests {
         );
         assert!(!runner.called_with("add -N README.md"));
         assert!(runner.called_with("reset -q -- frontend/src/new.rs"));
-        assert!(runner.called_with("--relative=frontend"));
+        assert!(runner.called_with("git diff -- frontend"));
     }
 }
