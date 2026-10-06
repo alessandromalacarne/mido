@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod config;
 pub mod error;
+pub mod gate;
 pub mod gates;
 pub mod lang;
 pub mod mcp;

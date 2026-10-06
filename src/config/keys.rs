@@ -1,7 +1,14 @@
+use crate::gate::Gate;
 use std::collections::BTreeSet;
 
+/// The gate section names, in ladder order — the one source for the schema.
 pub const GATES: [&str; 6] = [
-    "syntax", "size", "analysis", "tests", "coverage", "mutation",
+    Gate::Syntax.name(),
+    Gate::Size.name(),
+    Gate::Analysis.name(),
+    Gate::Tests.name(),
+    Gate::Coverage.name(),
+    Gate::Mutation.name(),
 ];
 
 pub const EXTRA_TOP_LEVEL_KEYS: [&str; 2] = ["version", "targets"];

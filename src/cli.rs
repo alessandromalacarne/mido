@@ -9,6 +9,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::io::Write;
 use std::path::PathBuf;
 
+pub use crate::gate::Gate;
+
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "mido",
@@ -78,16 +80,6 @@ pub enum Command {
     Mcp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Gate {
-    Syntax,
-    Size,
-    Analysis,
-    Tests,
-    Coverage,
-    Mutation,
-}
-
 /// The language modules `--lang` can force, overriding inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum LangArg {
@@ -98,19 +90,6 @@ impl LangArg {
     pub fn lang(self) -> Lang {
         match self {
             LangArg::Rust => Lang::Rust,
-        }
-    }
-}
-
-impl Gate {
-    pub fn name(self) -> &'static str {
-        match self {
-            Gate::Syntax => "syntax",
-            Gate::Size => "size",
-            Gate::Analysis => "analysis",
-            Gate::Tests => "tests",
-            Gate::Coverage => "coverage",
-            Gate::Mutation => "mutation",
         }
     }
 }

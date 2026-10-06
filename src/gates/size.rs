@@ -1,9 +1,10 @@
 //! Gate 2 — size and complexity ceilings.
 
 use crate::config::{Config, Threshold};
-use crate::gates::{fix_hints, GateRun};
+use crate::gate::Gate;
+use crate::gates::GateRun;
 use crate::lang::Lang;
-use crate::metrics::{tokei_code_lines, Unit};
+use crate::metrics::Unit;
 use crate::process::Runner;
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
 use crate::targets::Target;
@@ -148,25 +149,11 @@ pub fn gate_size(
     let source_files = existing_source_files(lang, repo, target, changed);
     let mut measurement_errors: Vec<String> = tool_errors.to_vec();
 
-    let lines = tokei_code_lines(
-        runner,
-        repo,
-        target,
-        &source_files,
-        &config.text_setting("size", "tool", "tokei", Some(&target.name)),
-        lang,
-        &mut measurement_errors,
-    );
-    let (file_problems, mut details) = judge_file_sizes(&lines, &limits);
-    let (unit_problems, unit_details) = judge_function_metrics(units, &limits);
-    details.extend(unit_details);
-    let mut problems: Vec<String> = file_problems;
-    problems.extend(unit_problems);
-
-    let tool = lang.analysis_supported_tool();
+    let lines = measured_lines(runner, run, &source_files, &mut measurement_errors);
+    let (problems, mut details) = judgement(units, &limits, &lines);
     details.extend(evidence_notes(
         units,
-        tool,
+        lang.metrics_tool(),
         &measurement_errors,
         &source_files,
     ));
@@ -179,7 +166,47 @@ pub fn gate_size(
         details.into_iter().chain(problems).collect::<Vec<_>>(),
     )
     .contract(limits.describe(&config.source()))
-    .fixes(fix_hints("size").iter().copied())
+    .fixes(Gate::Size.fix_hints().iter().copied())
+}
+
+/// The code lines the size tool reports; measurement failures land in
+/// `measurement_errors` and measure nothing.
+fn measured_lines(
+    runner: &dyn Runner,
+    run: &GateRun<'_>,
+    source_files: &[String],
+    measurement_errors: &mut Vec<String>,
+) -> BTreeMap<String, i64> {
+    let GateRun {
+        repo,
+        target,
+        config,
+        lang,
+        ..
+    } = *run;
+    let tool = config.text_setting("size", "tool", lang.size_tool(), Some(&target.name));
+    lang.code_lines(
+        runner,
+        repo,
+        target,
+        source_files,
+        &tool,
+        measurement_errors,
+    )
+}
+
+/// The problems and evidence one measurement pass produced.
+fn judgement(
+    units: &[Unit],
+    limits: &SizeLimits,
+    lines: &BTreeMap<String, i64>,
+) -> (Vec<String>, Vec<String>) {
+    let (file_problems, mut details) = judge_file_sizes(lines, limits);
+    let (unit_problems, unit_details) = judge_function_metrics(units, limits);
+    details.extend(unit_details);
+    let mut problems = file_problems;
+    problems.extend(unit_problems);
+    (problems, details)
 }
 
 /// The changed source files that still exist — a deleted file has nothing to
@@ -247,250 +274,4 @@ fn worst_summary(units: &[Unit], lang: Lang) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::Config;
-    use crate::lang::Lang;
-    use crate::test_support::{FakeRunner, MiniRepo};
-
-    fn gate_run_for<'a>(
-        repo: &'a MiniRepo,
-        config: &'a Config,
-        changed: &'a [String],
-    ) -> GateRun<'a> {
-        let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
-        crate::test_support::gate_run(&repo.root, target, config, changed)
-    }
-
-    fn limits() -> SizeLimits {
-        SizeLimits {
-            file_loc: Threshold::new(300, 500),
-            function_loc: Threshold::new(40, 60),
-            complexity: Threshold::new(10, 15),
-            nesting: Threshold::new(3, 4),
-        }
-    }
-
-    fn unit(name: &str, sloc: i64) -> Unit {
-        Unit {
-            sloc,
-            name: name.to_string(),
-            path: "src/foo.rs".to_string(),
-            ..Unit::new("src/foo.rs", name)
-        }
-    }
-
-    fn touch(repo: &MiniRepo, path: &str) {
-        let full = repo.root.join(path);
-        std::fs::create_dir_all(full.parent().expect("parent")).expect("dir");
-        std::fs::write(&full, "").expect("file");
-    }
-
-    #[test]
-    fn file_sizes_fail_at_the_ceiling_and_warn_before_it() {
-        let lines = BTreeMap::from([
-            ("src/big.rs".to_string(), 500),
-            ("src/medium.rs".to_string(), 300),
-            ("src/small.rs".to_string(), 10),
-        ]);
-
-        let (problems, details) = judge_file_sizes(&lines, &limits());
-
-        assert_eq!(problems.len(), 1);
-        assert!(problems[0].contains("src/big.rs: 500 code lines (fail >= 500)"));
-        assert!(details
-            .iter()
-            .any(|line| line.contains("src/medium.rs: 300 code lines (warn >= 300)")));
-        assert!(details
-            .iter()
-            .any(|line| line.contains("src/small.rs: 10 code lines (ok)")));
-    }
-
-    #[test]
-    fn function_metrics_fail_on_length_complexity_and_nesting() {
-        let long = unit("long", 61);
-        let complex = Unit {
-            cyclomatic: 15,
-            ..unit("complex", 10)
-        };
-        let nested = Unit {
-            nesting: Some(4),
-            ..unit("nested", 10)
-        };
-
-        let (problems, near) = judge_function_metrics(&[long, complex, nested], &limits());
-
-        assert_eq!(problems.len(), 3);
-        assert!(problems
-            .iter()
-            .any(|line| line.contains("function_loc 61 (fail >= 60)")));
-        assert!(problems
-            .iter()
-            .any(|line| line.contains("complexity 15 (fail >= 15)")));
-        assert!(problems
-            .iter()
-            .any(|line| line.contains("nesting 4 (fail >= 4)")));
-        assert!(near.is_empty());
-    }
-
-    #[test]
-    fn a_near_ceiling_function_warns_without_failing() {
-        let (problems, near) = judge_function_metrics(&[unit("borderline", 45)], &limits());
-
-        assert!(problems.is_empty());
-        assert_eq!(near.len(), 1);
-        assert!(near[0].contains("near the ceiling: borderline"));
-        assert!(near[0].contains("function_loc(warn)"));
-    }
-
-    #[test]
-    fn an_unmeasured_nesting_does_not_judge_nesting() {
-        let (problems, _) = judge_function_metrics(&[unit("no-nesting-data", 10)], &limits());
-
-        assert!(problems.is_empty());
-    }
-
-    #[test]
-    fn a_function_over_two_ceilings_reports_both_but_is_not_near_one() {
-        let over = Unit {
-            cyclomatic: 20,
-            ..unit("over", 70)
-        };
-
-        let (problems, near) = judge_function_metrics(&[over], &limits());
-
-        assert_eq!(problems.len(), 2);
-        assert!(near.is_empty());
-    }
-
-    #[test]
-    fn the_gate_fails_when_a_changed_file_is_over_the_ceiling() {
-        let repo = MiniRepo::build(None);
-        touch(&repo, "src/foo.rs");
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-        let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 600 } }] } });
-        let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-        let units = vec![unit("small", 5)];
-
-        let changed = vec!["src/foo.rs".to_string()];
-        let result = gate_size(
-            &runner,
-            &gate_run_for(&repo, &config, &changed),
-            &units,
-            &[],
-        );
-
-        assert_eq!(result.status, FAIL);
-        assert!(result.summary.contains("worst function"));
-        assert!(result.contract.contains("file_loc.fail=500"));
-    }
-
-    #[test]
-    fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
-        let repo = MiniRepo::build(None);
-        touch(&repo, "src/foo.rs");
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-        let runner = FakeRunner::with(&[("tokei", 127, "")]);
-
-        let changed = vec!["src/foo.rs".to_string()];
-        let result = gate_size(&runner, &gate_run_for(&repo, &config, &changed), &[], &[]);
-
-        assert_eq!(result.status, INCOMPLETE);
-        assert!(result
-            .details
-            .iter()
-            .any(|line| line.contains("measurement:")));
-        assert!(result
-            .details
-            .iter()
-            .any(|line| line.contains("returned nothing")));
-    }
-
-    #[test]
-    fn a_change_without_rust_files_passes_as_nothing_to_measure() {
-        let repo = MiniRepo::build(None);
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-        let runner = FakeRunner::default();
-
-        let changed = vec!["README.md".to_string()];
-        let result = gate_size(&runner, &gate_run_for(&repo, &config, &changed), &[], &[]);
-
-        assert_eq!(result.status, PASS);
-        assert_eq!(result.summary, "no rust changes");
-        assert!(
-            !result
-                .details
-                .iter()
-                .any(|line| line.contains("returned nothing")),
-            "nothing was measured, so nothing can be reported missing: {:?}",
-            result.details
-        );
-    }
-
-    #[test]
-    fn a_measurement_error_with_units_present_is_still_incomplete() {
-        let repo = MiniRepo::build(None);
-        touch(&repo, "src/foo.rs");
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-        let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
-        let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-        let errors = vec!["src/bar.rs: rust-code-analysis could not read it".to_string()];
-
-        let changed = vec!["src/foo.rs".to_string()];
-        let result = gate_size(
-            &runner,
-            &gate_run_for(&repo, &config, &changed),
-            &[unit("f", 5)],
-            &errors,
-        );
-
-        assert_eq!(result.status, INCOMPLETE);
-    }
-
-    #[test]
-    fn missing_units_do_not_claim_nesting_was_absent() {
-        let repo = MiniRepo::build(None);
-        touch(&repo, "src/foo.rs");
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-        let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
-        let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-
-        let changed = vec!["src/foo.rs".to_string()];
-        let result = gate_size(&runner, &gate_run_for(&repo, &config, &changed), &[], &[]);
-
-        assert!(result
-            .details
-            .iter()
-            .any(|line| line.contains("returned nothing")));
-        assert!(
-            !result
-                .details
-                .iter()
-                .any(|line| line.contains("nesting: not measured")),
-            "no units arrived, so nesting was never looked at: {:?}",
-            result.details
-        );
-    }
-
-    #[test]
-    fn nesting_absence_is_stated_in_the_evidence() {
-        let repo = MiniRepo::build(None);
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-        let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
-        let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-
-        let changed = vec!["src/foo.rs".to_string()];
-        let result = gate_size(
-            &runner,
-            &gate_run_for(&repo, &config, &changed),
-            &[unit("f", 5)],
-            &[],
-        );
-
-        assert_eq!(result.status, PASS);
-        assert!(result
-            .details
-            .iter()
-            .any(|line| line.contains("nesting: not measured")));
-    }
-}
+mod tests;

@@ -37,6 +37,14 @@ fn run_ladder_schema() -> Value {
 }
 
 fn run_ladder_properties() -> Value {
+    let mut properties = selection_properties();
+    merge(&mut properties, ladder_switches());
+    merge(&mut properties, reporting_properties());
+    properties
+}
+
+/// What the run measures: the target, the repo, and the scope.
+fn selection_properties() -> Value {
     json!({
         "target": {
             "type": "string",
@@ -56,11 +64,18 @@ fn run_ladder_properties() -> Value {
             "description": "measure these files, folders or target names instead of the diff \
                             (conflicts with base)",
         },
+    })
+}
+
+/// Which gates run, over how many targets.
+fn ladder_switches() -> Value {
+    let gate_names: Vec<&str> = crate::gate::GATES.iter().map(|gate| gate.name()).collect();
+    json!({
         "gates": {
             "type": "array",
             "items": {
                 "type": "string",
-                "enum": ["syntax", "size", "analysis", "tests", "coverage", "mutation"],
+                "enum": gate_names,
             },
             "description": "run only these gates; default: the whole ladder",
         },
@@ -75,6 +90,12 @@ fn run_ladder_properties() -> Value {
             "description": "add the local [workspace] aid when a worktree's manifest misses \
                             one, so cargo resolves the crate's own root",
         },
+    })
+}
+
+/// Where the evidence goes.
+fn reporting_properties() -> Value {
+    json!({
         "baseline_lcov": {
             "type": "string",
             "description": "lcov from the base revision, for the coverage delta",
@@ -91,6 +112,14 @@ fn run_ladder_properties() -> Value {
     })
 }
 
+/// Fold one json object's entries into another.
+fn merge(target: &mut Value, extra: Value) {
+    let object = target.as_object_mut().expect("json object");
+    for (key, value) in extra.as_object().expect("json object") {
+        object.insert(key.clone(), value.clone());
+    }
+}
+
 fn repo_arg() -> Value {
     json!({
         "type": "string",
@@ -99,9 +128,10 @@ fn repo_arg() -> Value {
 }
 
 fn lang_arg() -> Value {
+    let names: Vec<&str> = crate::lang::LANGS.iter().map(|lang| lang.name()).collect();
     json!({
         "type": "string",
-        "enum": ["rust"],
+        "enum": names,
         "description": "language module; default: inferred from the repo",
     })
 }
