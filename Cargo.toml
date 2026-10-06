@@ -5,6 +5,12 @@ edition = "2021"
 description = "Guardrails runner: the six-gate verification ladder described by .mido.toml"
 license = "MIT"
 
+# The package is `mido-guard`; the command stays `mido` — the CLI, the docs and
+# the integration tests all name the binary, not the package.
+[[bin]]
+name = "mido"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 regex = "1"
