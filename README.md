@@ -175,6 +175,26 @@ cargo build --release
 When `cargo` is not on `PATH`, every gate command is run through `nix develop -c …`
 so the dev shell provides the tools; otherwise commands are spawned directly.
 
+## Default tool requirements
+
+The ladder shells out: mido decides, the tools measure. The Rust module's
+built-in baseline (`src/lang/rust/defaults.toml`) expects these on `PATH`:
+
+| Gate | Tools the baseline calls | Where they come from |
+|------|--------------------------|----------------------|
+| `syntax` | `cargo fmt`, `cargo clippy`, `cargo check` | the Rust toolchain, with the `rustfmt` and `clippy` components |
+| `size` | `tokei`, `rust-code-analysis` | tokei reads file LOC; rust-code-analysis reads function metrics |
+| `analysis` | `rust-code-analysis` | maintainability index and cognitive complexity |
+| `tests` | `cargo test` | the Rust toolchain, or whatever `[tests] command` names |
+| `coverage` | `cargo llvm-cov` + LLVM `llvm-cov`/`llvm-profdata` | `cargo install cargo-llvm-cov`; LLVM tools from the `llvm-tools-preview` component, or system LLVM via `LLVM_COV`/`LLVM_PROFDATA` |
+| `mutation` | `cargo mutants` | `cargo install cargo-mutants`; add `cargo-nextest` for the recommended `test_tool = "nextest"` setup |
+
+Every command is an argv array in `.mido.toml`, so pointing a gate at a
+different tool is a config edit, not a code change. A missing tool never passes
+a gate: the command cannot run, the gate reports `INCOMPLETE`, and the run
+exits `2`. Install the tool — or work inside `nix develop`, whose dev shell
+carries all of them.
+
 ## Usage
 
 ```
