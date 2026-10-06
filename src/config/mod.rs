@@ -49,44 +49,61 @@ pub struct Config {
     warnings: Vec<String>,
 }
 
+/// The config an absent `.mido.toml` stands for: the module's defaults only.
+fn missing_config(path: PathBuf, defaults: Table, lang_name: &'static str) -> Config {
+    Config {
+        path: None,
+        data: Table::new(),
+        defaults,
+        lang_name,
+        warnings: vec![format!(
+            "no {} — falling back to the {lang_name} built-in defaults",
+            path.display()
+        )],
+    }
+}
+
+fn read_config(path: &Path) -> Result<String, GuardrailsError> {
+    std::fs::read_to_string(path).map_err(|error| {
+        GuardrailsError::config(format!("{} is not readable", path.display()))
+            .detail(error.to_string())
+    })
+}
+
+fn parse_config(text: &str, path: &Path) -> Result<Table, GuardrailsError> {
+    text.parse::<Table>().map_err(|error| {
+        GuardrailsError::config(format!("{} is not parseable toml", path.display()))
+            .detail(error.to_string())
+            .hint("the ladder refuses to guess thresholds from a broken config")
+    })
+}
+
+/// The schema requires `version = 1`; missing it is a warning, not an error.
+fn version_warnings(data: &Table, path: &Path) -> Vec<String> {
+    if data.contains_key("version") {
+        Vec::new()
+    } else {
+        vec![format!(
+            "{} has no `version = 1` — the guardrails schema requires it",
+            path.display()
+        )]
+    }
+}
+
 impl Config {
     pub fn load(repo: &Path, lang: &Lang) -> Result<Self, GuardrailsError> {
         let defaults = lang.default_config().clone();
         let lang_name = lang.name();
         let path = repo.join(".mido.toml");
         if !path.exists() {
-            return Ok(Self {
-                path: None,
-                data: Table::new(),
-                defaults,
-                lang_name,
-                warnings: vec![format!(
-                    "no {} — falling back to the {lang_name} built-in defaults",
-                    path.display()
-                )],
-            });
+            return Ok(missing_config(path, defaults, lang_name));
         }
 
-        let text = std::fs::read_to_string(&path).map_err(|error| {
-            GuardrailsError::config(format!("{} is not readable", path.display()))
-                .detail(error.to_string())
-        })?;
-        let data = text.parse::<Table>().map_err(|error| {
-            GuardrailsError::config(format!("{} is not parseable toml", path.display()))
-                .detail(error.to_string())
-                .hint("the ladder refuses to guess thresholds from a broken config")
-        })?;
-
+        let text = read_config(&path)?;
+        let data = parse_config(&text, &path)?;
         validate::validate_config(&data, &text, &path)?;
+        let warnings = version_warnings(&data, &path);
 
-        let warnings = if data.contains_key("version") {
-            Vec::new()
-        } else {
-            vec![format!(
-                "{} has no `version = 1` — the guardrails schema requires it",
-                path.display()
-            )]
-        };
         Ok(Self {
             path: Some(path),
             data,

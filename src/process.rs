@@ -5,6 +5,10 @@ use std::process::{Child, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod git;
+
+pub use git::{changed_files, dirty_hash, git, pick_base, workspace_root};
+
 pub const TIMEOUT_EXIT: i32 = 124;
 pub const NOT_FOUND_EXIT: i32 = 127;
 
@@ -87,42 +91,18 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn exec(&self, command: &Command) -> Outcome {
-        let Some((program, rest)) = command.args.split_first() else {
-            return Outcome::new(NOT_FOUND_EXIT, "", "no command given");
-        };
-
-        let mut child: Child = match std::process::Command::new(program)
-            .args(rest)
-            .current_dir(&command.cwd)
-            .stdin(Stdio::piped())
-            .stdout(stream_for(&command.stdout_file))
-            .stderr(stream_for(&command.stderr_file))
-            .spawn()
-        {
+        let mut child = match spawn(command) {
             Ok(child) => child,
-            Err(error) => return Outcome::new(NOT_FOUND_EXIT, "", error.to_string()),
+            Err(outcome) => return outcome,
         };
-
-        if let Some(input) = &command.stdin {
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                let _ = stdin.write_all(input.as_bytes());
-            }
-        } else {
-            drop(child.stdin.take());
-        }
+        feed_stdin(&mut child, command.stdin.as_ref());
 
         let stdout = child.stdout.take().map(read_async);
         let stderr = child.stderr.take().map(read_async);
         let status = wait_with_timeout(&mut child, command.timeout);
 
-        let stdout = stdout
-            .and_then(|handle| handle.join().ok())
-            .unwrap_or_default();
-        let stderr = stderr
-            .and_then(|handle| handle.join().ok())
-            .unwrap_or_default();
-
+        let stdout = collect(stdout);
+        let stderr = collect(stderr);
         match status {
             Some(status) => Outcome::new(status, stdout, stderr),
             None => Outcome::new(
@@ -139,6 +119,39 @@ impl Runner for SystemRunner {
         };
         std::env::split_paths(&path).any(|directory| is_executable(&directory.join(tool)))
     }
+}
+
+fn spawn(command: &Command) -> Result<Child, Outcome> {
+    let Some((program, rest)) = command.args.split_first() else {
+        return Err(Outcome::new(NOT_FOUND_EXIT, "", "no command given"));
+    };
+
+    std::process::Command::new(program)
+        .args(rest)
+        .current_dir(&command.cwd)
+        .stdin(Stdio::piped())
+        .stdout(stream_for(&command.stdout_file))
+        .stderr(stream_for(&command.stderr_file))
+        .spawn()
+        .map_err(|error| Outcome::new(NOT_FOUND_EXIT, "", error.to_string()))
+}
+
+/// Hand the child its input and close the pipe when there is none.
+fn feed_stdin(child: &mut Child, input: Option<&String>) {
+    if let Some(input) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(input.as_bytes());
+        }
+    } else {
+        drop(child.stdin.take());
+    }
+}
+
+fn collect(handle: Option<thread::JoinHandle<String>>) -> String {
+    handle
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default()
 }
 
 /// A file the caller asked for, or a pipe when the file cannot be created.
@@ -214,8 +227,8 @@ fn exit_status(status: std::process::ExitStatus) -> i32 {
 
 /// Run a command with `workdir` as its directory, inside the dev shell when needed.
 ///
-/// The language module names the binary (`probe_tool`) whose presence means the
-/// environment already carries the gate tools; when it is missing the command
+/// The language module names the binary (`Lang::env_tool`) whose presence means
+/// the environment already carries the gate tools; when it is missing the command
 /// runs through `nix develop -c …`.
 ///
 /// `nix develop` prints its shellHook and flake notices on stderr before the
@@ -260,89 +273,19 @@ pub fn scratch_directory(prefix: &str) -> PathBuf {
     directory
 }
 
-/// The last `count` lines of some output, trimmed.
-pub fn last_lines(text: &str, count: usize) -> Vec<String> {
+/// The last `count` lines of some output, trimmed and prefixed.
+pub fn last_lines_with(text: &str, count: usize, prefix: &str) -> Vec<String> {
     let lines: Vec<&str> = text.trim().lines().collect();
     let start = lines.len().saturating_sub(count);
     lines[start..]
         .iter()
-        .map(|line| (*line).trim().to_string())
+        .map(|line| format!("{prefix}{}", line.trim()))
         .collect()
 }
 
-pub fn git(runner: &dyn Runner, repo: &Path, args: &[&str]) -> String {
-    let command_args = std::iter::once("git").chain(args.iter().copied());
-    let result = runner.exec(&Command::new(repo, command_args));
-    if result.ok() {
-        result.stdout
-    } else {
-        String::new()
-    }
-}
-
-/// The revision stamp: `git status --short | git hash-object --stdin`.
-pub fn dirty_hash(runner: &dyn Runner, repo: &Path) -> String {
-    let status = runner
-        .exec(&Command::new(repo, ["git", "status", "--short"]))
-        .stdout;
-    runner
-        .exec(&Command::new(repo, ["git", "hash-object", "--stdin"]).stdin(status))
-        .stdout
-        .trim()
-        .to_string()
-}
-
-pub fn workspace_root(runner: &dyn Runner, cwd: &Path) -> PathBuf {
-    let located = git(runner, cwd, &["rev-parse", "--show-toplevel"]);
-    let trimmed = located.trim();
-    if trimmed.is_empty() {
-        cwd.to_path_buf()
-    } else {
-        PathBuf::from(trimmed)
-    }
-}
-
-/// Repo-relative files changed against `base`, working tree included.
-pub fn changed_files(runner: &dyn Runner, repo: &Path, base: &str) -> Vec<String> {
-    let merge_base = git(runner, repo, &["merge-base", "HEAD", base]);
-    let merge_base = {
-        let trimmed = merge_base.trim();
-        if trimmed.is_empty() {
-            "HEAD".to_string()
-        } else {
-            trimmed.to_string()
-        }
-    };
-
-    let committed = git(runner, repo, &["diff", "--name-only", &merge_base]);
-    let staged = git(runner, repo, &["diff", "--name-only", "--cached"]);
-    let untracked = git(
-        runner,
-        repo,
-        &["ls-files", "--others", "--exclude-standard"],
-    );
-
-    let mut files: Vec<String> = [committed, staged, untracked]
-        .iter()
-        .flat_map(|output| output.lines().map(|line| line.to_string()))
-        .filter(|line| !line.is_empty())
-        .collect();
-    files.sort();
-    files.dedup();
-    files
-}
-
-pub fn pick_base(runner: &dyn Runner, repo: &Path) -> String {
-    for candidate in ["origin/mvp", "origin/develop", "origin/master"] {
-        let result = runner.exec(&Command::new(
-            repo,
-            ["git", "rev-parse", "--verify", "--quiet", candidate],
-        ));
-        if result.ok() {
-            return candidate.to_string();
-        }
-    }
-    "HEAD".to_string()
+/// The last `count` lines of some output, trimmed.
+pub fn last_lines(text: &str, count: usize) -> Vec<String> {
+    last_lines_with(text, count, "")
 }
 
 #[cfg(test)]

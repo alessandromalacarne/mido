@@ -137,6 +137,14 @@ fn last_lines_keeps_the_tail_of_an_output() {
 }
 
 #[test]
+fn last_lines_can_prefix_what_it_keeps() {
+    assert_eq!(
+        last_lines_with("one\ntwo\nthree", 2, "lint: "),
+        vec!["lint: two", "lint: three"]
+    );
+}
+
+#[test]
 fn missing_program_is_a_not_found_exit() {
     let outcome = SystemRunner.exec(&Command::new("/", Vec::<String>::new()));
 

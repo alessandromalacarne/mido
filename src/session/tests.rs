@@ -1,87 +1,11 @@
 use super::*;
 use crate::cli::parse_from;
+use crate::gate::GATES;
 use crate::lang::Lang;
-use crate::report::PASS;
-use crate::test_support::{changed_runner, run_cli as run, FakeRunner, MiniRepo};
+use crate::test_support::{config_for, session_for, FakeRunner, MiniRepo};
 
-#[test]
-fn list_targets_prints_the_detected_set() {
-    let repo = MiniRepo::build(None);
-    let (code, out, _) = run(
-        &["--repo", &repo.root.to_string_lossy(), "--list-targets"],
-        &FakeRunner::default(),
-    );
-
-    assert_eq!(code, 0);
-    assert!(out.contains("frontend"));
-    assert!(out.contains("workspace"));
-    assert!(out.contains("standalone crate"));
-}
-
-#[test]
-fn a_config_without_a_version_warns_on_stderr() {
-    let repo = MiniRepo::build(Some(
-        "
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "--list-targets"],
-        &FakeRunner::default(),
-    );
-
-    assert_eq!(code, 0);
-    assert!(err.contains("warning:"), "{err}");
-    assert!(err.contains("version"), "{err}");
-}
-
-#[test]
-fn unknown_target_exits_2_with_a_detailed_error() {
-    let repo = MiniRepo::build(None);
-    let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "nope"],
-        &FakeRunner::default(),
-    );
-
-    assert_eq!(code, 2);
-    assert!(err.contains("error:"));
-    assert!(err.contains("frontend"));
-}
-
-#[test]
-fn invalid_config_exits_2_with_a_detailed_error() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [analysis]
-            min_mi = 20
-        ",
-    ));
-    let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "frontend"],
-        &FakeRunner::default(),
-    );
-
-    assert_eq!(code, 2);
-    assert!(err.contains("min_mi"));
-    assert!(err.contains("unknown key `min_mi`"));
-    assert!(err.contains("line 5: unknown key `min_mi`"));
-}
-
-#[test]
-fn no_changed_files_exits_2_instead_of_claiming_a_pass() {
-    let repo = MiniRepo::build(None);
-    let _ = repo.git();
-    let (code, out, _) = run(
-        &["--repo", &repo.root.to_string_lossy(), "workspace"],
-        &FakeRunner::default(),
-    );
-
-    assert_eq!(code, 2);
-    assert!(out.to_lowercase().contains("nothing"));
-}
+mod output;
+mod run;
 
 #[test]
 fn a_gate_name_that_does_not_exist_never_reaches_the_ladder() {
@@ -110,7 +34,7 @@ fn a_run_without_a_gate_selection_uses_all_six() {
     let session = build_session(
         &parse_from(&["--repo", "."]),
         &repo.root,
-        Config::load(&repo.root, &Lang::Rust).expect("config"),
+        config_for(&repo),
         &FakeRunner::default(),
         Lang::Rust,
     )
@@ -120,40 +44,11 @@ fn a_run_without_a_gate_selection_uses_all_six() {
 }
 
 #[test]
-fn a_target_owning_none_of_the_diff_leaves_nothing_ship_ready() {
-    let repo = MiniRepo::build(None);
-    let runner = changed_runner((0, "test result: ok. 1 passed; 0 failed\n"));
-
-    let (code, out, _) = run(
-        &["--repo", &repo.root.to_string_lossy(), "frontend"],
-        &runner,
-    );
-
-    assert_eq!(code, 2);
-    assert!(out.contains("no gate ran"), "{out}");
-    assert!(out.contains("nothing here is ship-ready"), "{out}");
-}
-
-#[test]
 fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let session = Session {
-        repo: repo.root.clone(),
-        config,
-        lang: Lang::Rust,
-        base: "HEAD".to_string(),
-        scope: Scope::Diff,
         changed: vec!["lib/src/foo.rs".to_string()],
-        revision: "abc".to_string(),
-        dirty: "def".to_string(),
-        gates: GATES.iter().map(|gate| (*gate).to_string()).collect(),
-        scratch: repo.root.join("scratch"),
-        baseline_lcov: None,
-        report_path: None,
-        apply_aid: false,
-        as_json: false,
-        selection: "auto".to_string(),
+        ..session_for(&repo, config_for(&repo))
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut io = Io {
@@ -177,214 +72,12 @@ fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
 }
 
 #[test]
-fn the_report_path_follows_the_session_scratchpad() {
-    let explicit = PathBuf::from("/tmp/explicit.md");
-
-    assert_eq!(default_report_path(Some(explicit.clone())), Some(explicit));
-}
-
-#[test]
-fn targets_are_listed_with_their_kind() {
-    let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-    let mut out = Vec::new();
-
-    print_targets(
-        &mut out,
-        &repo.root,
-        &Lang::Rust.detect_targets(&repo.root, &config),
-        crate::style::Style::plain(),
-    );
-
-    let printed = String::from_utf8(out).expect("utf8");
-    assert!(printed.contains("targets under"));
-    assert!(printed.contains("workspace"));
-    assert!(printed.contains("member"));
-}
-
-#[test]
-fn the_target_table_aligns_on_its_widest_name() {
-    let targets = BTreeMap::from([
-        (
-            "a-very-long-target-name".to_string(),
-            Target::crate_target("a-very-long-target-name", false, "Cargo.toml"),
-        ),
-        (
-            "api".to_string(),
-            Target::crate_target("api", false, "Cargo.toml"),
-        ),
-    ]);
-    let mut out = Vec::new();
-
-    print_targets(
-        &mut out,
-        Path::new("/repo"),
-        &targets,
-        crate::style::Style::plain(),
-    );
-
-    let printed = String::from_utf8(out).expect("utf8");
-    let rows: Vec<&str> = printed.lines().collect();
-    assert_eq!(rows[0], "targets under /repo:");
-    assert!(rows[2].starts_with("  NAME"));
-    let path_column = rows[2]
-        .find("PATH")
-        .expect("the header names the path column");
-    assert!(rows[3][path_column..].starts_with("a-very-long-target-name"));
-    assert!(rows[4][path_column..].starts_with("api"));
-    assert!(rows[3].ends_with("standalone crate"));
-}
-
-#[test]
-fn a_passing_run_writes_the_report_and_says_so() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let report = repo.root.join("report.md");
-    let runner = changed_runner((0, "test result: ok. 3 passed; 0 failed\n"));
-
-    let (code, out, _) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "workspace",
-            "--gate",
-            "tests",
-            "--report",
-            &report.to_string_lossy(),
-            "--json",
-        ],
-        &runner,
-    );
-
-    assert_eq!(code, 0);
-    assert!(out.contains("│ SHIP-READY"), "{out}");
-    assert!(out.contains("\"verdict\":\"SHIP-READY\""));
-    assert!(out.contains("report written to"));
-    let markdown = std::fs::read_to_string(&report).expect("report");
-    assert!(markdown.contains("VERDICT: SHIP-READY"));
-}
-
-#[test]
-fn a_failing_gate_exits_1_with_the_failure_report_on_stdout() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let runner = changed_runner((101, "test result: FAILED. 0 passed; 2 failed\n"));
-    let report = repo.root.join("report.md");
-
-    let (code, out, err) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "workspace",
-            "--gate",
-            "tests",
-            "--report",
-            &report.to_string_lossy(),
-        ],
-        &runner,
-    );
-
-    assert_eq!(code, 1);
-    assert!(out.contains("╭─ failure"), "{out}");
-    assert!(out.contains("[4/6] ✗ tests — FAIL"), "{out}");
-    assert!(err.contains("error: guardrails BLOCKED"));
-    assert!(std::fs::read_to_string(&report)
-        .expect("report")
-        .contains("VERDICT: BLOCKED — tests=FAIL"));
-}
-
-#[test]
-fn a_gate_that_never_reached_a_verdict_exits_2_instead_of_1() {
-    let repo = MiniRepo::build(None);
-    std::fs::create_dir_all(repo.root.join("lib/src")).expect("member src dir");
-    std::fs::write(
-        repo.root.join("lib/src/foo.rs"),
-        "pub fn foo() -> i64 {\n    1\n}\n",
-    )
-    .expect("changed file");
-    let runner = changed_runner((0, ""));
-
-    let (code, out, err) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "workspace",
-            "--gate",
-            "size",
-        ],
-        &runner,
-    );
-
-    assert_eq!(code, 2, "INCOMPLETE is not a FAIL: {out}");
-    assert!(out.contains("BLOCKED — size=INCOMPLETE"), "{out}");
-    assert!(err.contains("error: guardrails BLOCKED"), "{err}");
-}
-
-#[test]
-fn a_report_path_is_never_relative_to_the_process_directory() {
-    let repo = PathBuf::from("/repo");
-
-    assert_eq!(
-        report_path(Some(PathBuf::from("report.md")), &repo),
-        Some(PathBuf::from("/repo/report.md"))
-    );
-    assert_eq!(
-        report_path(Some(PathBuf::from("/abs/report.md")), &repo),
-        Some(PathBuf::from("/abs/report.md"))
-    );
-
-    if let Some(path) = report_path(None, &repo) {
-        assert!(path.is_absolute(), "{path:?} must not depend on the cwd");
-    }
-}
-
-#[test]
-fn a_target_without_a_manifest_is_a_setup_error() {
-    let repo = MiniRepo::build(None);
-    std::fs::remove_file(repo.root.join("frontend/Cargo.toml")).expect("manifest removed");
-    let runner = changed_runner((0, "test result: ok. 1 passed; 0 failed\n"));
-
-    let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "frontend"],
-        &runner,
-    );
-
-    assert_eq!(code, 2);
-    assert!(err.contains("Cargo.toml"));
-}
-
-#[test]
 fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let session = Session {
-        repo: repo.root.clone(),
-        config,
-        lang: Lang::Rust,
-        base: "HEAD".to_string(),
-        scope: Scope::Diff,
         changed: vec!["README.md".to_string()],
-        revision: "abc".to_string(),
-        dirty: "def".to_string(),
-        gates: vec!["tests".to_string()],
-        scratch: repo.root.join("scratch"),
-        baseline_lcov: None,
-        report_path: None,
-        apply_aid: false,
-        as_json: false,
-        selection: "auto".to_string(),
+        gates: vec![Gate::Tests],
+        ..session_for(&repo, config_for(&repo))
     };
     let targets = Lang::Rust.detect_targets(&repo.root, &session.config);
     let mut out = Vec::new();
@@ -405,23 +98,10 @@ fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
 #[test]
 fn every_target_can_be_selected_with_all() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let session = Session {
-        repo: repo.root.clone(),
-        config,
-        lang: Lang::Rust,
-        base: "HEAD".to_string(),
-        scope: Scope::Diff,
         changed: vec!["lib/src/foo.rs".to_string()],
-        revision: "abc".to_string(),
-        dirty: "def".to_string(),
-        gates: vec!["tests".to_string()],
-        scratch: repo.root.join("scratch"),
-        baseline_lcov: None,
-        report_path: None,
-        apply_aid: false,
-        as_json: false,
-        selection: "auto".to_string(),
+        gates: vec![Gate::Tests],
+        ..session_for(&repo, config_for(&repo))
     };
     let targets = Lang::Rust.detect_targets(&repo.root, &session.config);
 
@@ -440,85 +120,9 @@ fn every_target_can_be_selected_with_all() {
 }
 
 #[test]
-fn a_pass_verdict_line_matches_the_gate_result() {
-    let repo = MiniRepo::build(None);
-    let session = Session {
-        repo: repo.root.clone(),
-        config: Config::load(&repo.root, &Lang::Rust).expect("config loads"),
-        lang: Lang::Rust,
-        base: "HEAD".to_string(),
-        scope: Scope::Diff,
-        changed: Vec::new(),
-        revision: "abc".to_string(),
-        dirty: "def".to_string(),
-        gates: Vec::new(),
-        scratch: repo.root.join("scratch"),
-        baseline_lcov: None,
-        report_path: None,
-        apply_aid: false,
-        as_json: false,
-        selection: "auto".to_string(),
-    };
-    let mut out = Vec::new();
-
-    print_verdict(
-        &mut out,
-        &session,
-        &Target::workspace_target("Cargo.toml"),
-        &[GateResult::new(
-            "tests",
-            PASS,
-            "3 passed",
-            Vec::<String>::new(),
-        )],
-        crate::style::Style::plain(),
-    );
-
-    let printed = String::from_utf8(out).expect("utf8");
-    assert!(printed.starts_with("╭─ verdict"), "{printed}");
-    assert!(printed.contains("│ SHIP-READY"), "{printed}");
-    assert!(printed.contains("revision stamp: abc | def"), "{printed}");
-}
-
-#[test]
-fn the_scratch_directory_is_a_guardrails_directory_that_exists() {
-    let directory = scratch_dir();
-
-    assert!(directory.ends_with("guardrails"));
-    assert!(directory.is_dir());
-    assert!(scratch_dir_in(PathBuf::from("/tmp/guardrails-test")).is_dir());
-}
-
-#[test]
-fn an_empty_scratchpad_variable_is_not_a_sandbox() {
-    // The environment is process-wide, so this test owns it while it runs.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let previous = std::env::var("COMMANDCODE_SCRATCHPAD").ok();
-
-    std::env::set_var("COMMANDCODE_SCRATCHPAD", "");
-    assert_eq!(sandbox_root(), None);
-    assert_eq!(default_report_path(None), None);
-
-    std::env::set_var("COMMANDCODE_SCRATCHPAD", "/tmp/sandbox");
-    assert_eq!(sandbox_root(), Some(PathBuf::from("/tmp/sandbox")));
-    assert_eq!(
-        default_report_path(None),
-        Some(PathBuf::from("/tmp/sandbox/guardrails-report.md"))
-    );
-
-    match previous {
-        Some(value) => std::env::set_var("COMMANDCODE_SCRATCHPAD", value),
-        None => std::env::remove_var("COMMANDCODE_SCRATCHPAD"),
-    }
-}
-
-#[test]
 fn the_session_records_how_the_target_was_chosen() {
     let repo = MiniRepo::build(None);
-    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+    let config = config_for(&repo);
     let runner = FakeRunner::default();
 
     let auto = build_session(

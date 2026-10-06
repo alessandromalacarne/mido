@@ -66,11 +66,6 @@ impl Style {
         self.paint("1", text)
     }
 
-    /// The gate vocabulary decides the colour, not the caller.
-    pub fn status(self, status: &str) -> String {
-        self.paint_status(status, status)
-    }
-
     /// Paints arbitrary text — a glyph, a gate name — in a status' colour.
     pub fn paint_status(self, status: &str, text: &str) -> String {
         match status {

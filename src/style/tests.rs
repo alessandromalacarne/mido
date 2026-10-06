@@ -52,7 +52,7 @@ fn a_plain_style_writes_no_escape_codes() {
     assert_eq!(style.pass(PASS), PASS);
     assert_eq!(style.fail("size=FAIL"), "size=FAIL");
     assert_eq!(style.dim("src/foo.rs"), "src/foo.rs");
-    assert_eq!(style.status(INCOMPLETE), INCOMPLETE);
+    assert_eq!(style.paint_status(INCOMPLETE, INCOMPLETE), INCOMPLETE);
 }
 
 #[test]
@@ -61,8 +61,14 @@ fn a_coloured_style_paints_each_status() {
 
     assert_eq!(style.pass(PASS), "\u{1b}[32mPASS\u{1b}[0m");
     assert_eq!(style.fail(FAIL), "\u{1b}[31mFAIL\u{1b}[0m");
-    assert_eq!(style.status(INCOMPLETE), "\u{1b}[33mINCOMPLETE\u{1b}[0m");
-    assert_eq!(style.status(SKIPPED), "\u{1b}[2mSKIPPED\u{1b}[0m");
+    assert_eq!(
+        style.paint_status(INCOMPLETE, INCOMPLETE),
+        "\u{1b}[33mINCOMPLETE\u{1b}[0m"
+    );
+    assert_eq!(
+        style.paint_status(SKIPPED, SKIPPED),
+        "\u{1b}[2mSKIPPED\u{1b}[0m"
+    );
     assert_eq!(style.bold("mido"), "\u{1b}[1mmido\u{1b}[0m");
     assert_eq!(
         style.paint_status(FAIL, "✗ size"),
@@ -76,7 +82,10 @@ fn a_coloured_style_paints_each_status() {
 
 #[test]
 fn a_status_outside_the_vocabulary_is_left_alone() {
-    assert_eq!(Style::colored().status("WHATEVER"), "WHATEVER");
+    assert_eq!(
+        Style::colored().paint_status("WHATEVER", "WHATEVER"),
+        "WHATEVER"
+    );
 }
 
 #[test]
