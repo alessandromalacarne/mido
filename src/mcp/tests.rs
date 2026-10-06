@@ -1,10 +1,12 @@
 use super::*;
-use std::cell::RefCell;
+use std::sync::Mutex;
+use std::time::Duration;
 
 /// Stands in for a real mido invocation: cheap, deterministic, records argv.
 struct Stub {
     result: Invocation,
-    argv: RefCell<Vec<String>>,
+    argv: Mutex<Vec<String>>,
+    delay: Duration,
 }
 
 impl Stub {
@@ -19,18 +21,20 @@ impl Stub {
                     "stub stderr\n".to_string()
                 },
             },
-            argv: RefCell::new(Vec::new()),
+            argv: Mutex::new(Vec::new()),
+            delay: Duration::ZERO,
         }
     }
 
     fn argv(&self) -> Vec<String> {
-        self.argv.borrow().clone()
+        self.argv.lock().expect("not poisoned").clone()
     }
 }
 
 impl Invoke for Stub {
     fn invoke(&self, argv: &[String]) -> Invocation {
-        *self.argv.borrow_mut() = argv.to_vec();
+        std::thread::sleep(self.delay);
+        *self.argv.lock().expect("not poisoned") = argv.to_vec();
         self.result.clone()
     }
 }
@@ -266,7 +270,13 @@ fn the_stdio_loop_answers_requests_and_skips_notifications() {
     );
     let mut output = Vec::new();
 
-    serve(std::io::Cursor::new(input), &mut output, &Stub::new(0)).expect("the loop completes");
+    serve(
+        std::io::Cursor::new(input),
+        &mut output,
+        &Stub::new(0),
+        HEARTBEAT,
+    )
+    .expect("the loop completes");
 
     let lines: Vec<&str> = std::str::from_utf8(&output)
         .expect("utf8")
@@ -277,6 +287,88 @@ fn the_stdio_loop_answers_requests_and_skips_notifications() {
     let second: Value = serde_json::from_str(lines[1]).expect("json");
     assert_eq!(first["id"], 1);
     assert_eq!(second["id"], 2);
+}
+
+#[test]
+fn a_slow_tool_call_heartbeats_until_the_answer_lands() {
+    let mut stub = Stub::new(1);
+    stub.delay = Duration::from_millis(60);
+    let input = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{",
+        "\"name\":\"run_ladder\",\"arguments\":{},",
+        "\"_meta\":{\"progressToken\":\"tok-1\"}}}\n",
+    );
+    let mut output = Vec::new();
+
+    serve(
+        std::io::Cursor::new(input),
+        &mut output,
+        &stub,
+        Duration::from_millis(10),
+    )
+    .expect("the loop completes");
+
+    let messages: Vec<Value> = std::str::from_utf8(&output)
+        .expect("utf8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("json"))
+        .collect();
+    let beats: Vec<&Value> = messages
+        .iter()
+        .filter(|message| message["method"] == "notifications/progress")
+        .collect();
+
+    assert!(!beats.is_empty(), "{output:?}");
+    for beat in &beats {
+        assert_eq!(beat["params"]["progressToken"], "tok-1");
+        assert!(beat["params"]["progress"].as_u64().is_some(), "{beat}");
+        let text = beat["params"]["message"].as_str().expect("a message");
+        assert!(text.contains("run_ladder"), "{text}");
+        assert!(text.contains("elapsed"), "{text}");
+    }
+    let answer = messages.last().expect("the answer");
+    assert_eq!(answer["id"], 7);
+    assert_eq!(answer["result"]["isError"], true);
+}
+
+#[test]
+fn the_heartbeat_clock_reads_seconds_then_minutes() {
+    assert_eq!(elapsed_text(Duration::from_secs(0)), "0s");
+    assert_eq!(elapsed_text(Duration::from_secs(59)), "59s");
+    assert_eq!(elapsed_text(Duration::from_secs(60)), "1m00s");
+    assert_eq!(elapsed_text(Duration::from_secs(61)), "1m01s");
+}
+
+#[test]
+fn a_slow_tool_call_without_a_usable_token_stays_silent() {
+    let mut stub = Stub::new(0);
+    stub.delay = Duration::from_millis(30);
+    let input = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",",
+        "\"params\":{\"name\":\"run_ladder\",\"arguments\":{}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",",
+        "\"params\":{\"name\":\"run_ladder\",\"arguments\":{},",
+        "\"_meta\":{\"progressToken\":null}}}\n",
+    );
+    let mut output = Vec::new();
+
+    serve(
+        std::io::Cursor::new(input),
+        &mut output,
+        &stub,
+        Duration::from_millis(5),
+    )
+    .expect("the loop completes");
+
+    let lines: Vec<&str> = std::str::from_utf8(&output)
+        .expect("utf8")
+        .lines()
+        .collect();
+    assert_eq!(lines.len(), 2, "{output:?}");
+    for (line, id) in lines.iter().zip([8, 9]) {
+        let answer: Value = serde_json::from_str(line).expect("json");
+        assert_eq!(answer["id"], id, "{answer}");
+    }
 }
 
 #[test]
