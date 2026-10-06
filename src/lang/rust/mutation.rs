@@ -161,7 +161,12 @@ fn write_patch(
 ) -> Result<(), GuardrailsError> {
     let mut diff = vec!["git".to_string(), "diff".to_string()];
     if !target.path.is_empty() {
-        diff.push(format!("--relative={}", target.path));
+        // cargo-mutants resolves --in-diff paths against the cargo workspace
+        // root, not the directory it runs in. `--relative` would rewrite them
+        // against the target, so the patch keeps root-relative paths and the
+        // target stays scoped by a pathspec.
+        diff.push("--".to_string());
+        diff.push(target.path.clone());
     }
     let result = runner.exec(&Command::new(repo, diff));
 
