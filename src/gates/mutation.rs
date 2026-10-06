@@ -1,13 +1,15 @@
 //! Gate 6 — do the tests actually detect broken code?
 
 use crate::config::Config;
-use crate::gates::{fix_hints, GateRun};
+use crate::error::GuardrailsError;
+use crate::gate::Gate;
+use crate::gates::GateRun;
 use crate::lang::{Lang, MutationScope, MutationSummary};
 use crate::metrics::percent;
 use crate::process::last_lines;
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
-use crate::targets::Scope;
+use crate::targets::{Scope, Target};
 
 pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
     let GateRun {
@@ -19,14 +21,12 @@ pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
         changed,
         ..
     } = *run;
-    let minimum = config.float("mutation", "kill_rate_min", 70.0, Some(&target.name));
-    let timeout = config.int("mutation", "timeout_secs", 3600, Some(&target.name));
-    let configured = config.text_setting("mutation", "scope", "changed", Some(&target.name));
-    let mutable: Vec<String> = changed
-        .iter()
-        .filter(|path| lang.is_source(path))
-        .cloned()
-        .collect();
+    let MutationSettings {
+        minimum,
+        timeout,
+        configured,
+    } = mutation_settings(config, target);
+    let mutable = mutable_sources(changed, lang);
 
     // A run pointed at paths has no diff to patch, so the files themselves are
     // the scope. Nothing mutable is nothing to measure — never a pass.
@@ -38,11 +38,7 @@ pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
         Ok(args) => args,
         Err(error) => return unpatched(error),
     };
-    let contract = format!(
-        "{} [mutation] kill_rate_min={minimum}, scope={configured} via `{}`",
-        config.source(),
-        args.join(" ")
-    );
+    let contract = mutation_contract(config, minimum, &configured, &args);
 
     let result = process::dev(
         runner,
@@ -54,6 +50,39 @@ pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
     judge_mutation(&result, &contract, minimum, timeout, lang)
 }
 
+/// The changed files the mutation tool can mutate.
+fn mutable_sources(changed: &[String], lang: Lang) -> Vec<String> {
+    changed
+        .iter()
+        .filter(|path| lang.is_source(path))
+        .cloned()
+        .collect()
+}
+
+/// The `[mutation]` settings one run reads.
+struct MutationSettings {
+    minimum: f64,
+    timeout: i64,
+    configured: String,
+}
+
+fn mutation_settings(config: &Config, target: &Target) -> MutationSettings {
+    MutationSettings {
+        minimum: config.float("mutation", "kill_rate_min", 70.0, Some(&target.name)),
+        timeout: config.int("mutation", "timeout_secs", 3600, Some(&target.name)),
+        configured: config.text_setting("mutation", "scope", "changed", Some(&target.name)),
+    }
+}
+
+/// The contract line the gate cites, whatever its verdict.
+fn mutation_contract(config: &Config, minimum: f64, configured: &str, args: &[String]) -> String {
+    format!(
+        "{} [mutation] kill_rate_min={minimum}, scope={configured} via `{}`",
+        config.source(),
+        args.join(" ")
+    )
+}
+
 /// The mutation command: the module's command plus its scope flags and the
 /// per-mutant timeout.
 fn mutation_command(
@@ -62,7 +91,7 @@ fn mutation_command(
     lang: Lang,
     configured: &str,
     mutable: &[String],
-) -> Result<Vec<String>, std::io::Error> {
+) -> Result<Vec<String>, GuardrailsError> {
     let GateRun {
         repo,
         target,
@@ -90,14 +119,9 @@ fn mutation_command(
 }
 
 /// The verdict for a patch that could not be written: INCOMPLETE, never a pass.
-fn unpatched(error: std::io::Error) -> GateResult {
-    GateResult::new(
-        "mutation",
-        INCOMPLETE,
-        "the changed-file patch could not be written",
-        [error.to_string()],
-    )
-    .fixes(fix_hints("mutation").iter().copied())
+fn unpatched(error: GuardrailsError) -> GateResult {
+    GateResult::new("mutation", INCOMPLETE, error.message(), [error.render()])
+        .fixes(Gate::Mutation.fix_hints().iter().copied())
 }
 
 /// The verdict for a path scope with nothing the mutation tool can mutate.
@@ -116,7 +140,7 @@ fn nothing_mutable(config: &Config, lang: Lang) -> GateResult {
         "{} [mutation] scope=explicit paths, no {label} file to mutate",
         config.source()
     ))
-    .fixes(fix_hints("mutation").iter().copied())
+    .fixes(Gate::Mutation.fix_hints().iter().copied())
 }
 
 fn judge_mutation(
@@ -129,37 +153,51 @@ fn judge_mutation(
     let output = result.combined();
 
     if result.code == process::TIMEOUT_EXIT {
-        return GateResult::new(
-            "mutation",
-            INCOMPLETE,
+        return incomplete(
             format!("timed out after {timeout}s"),
-            tail(&output),
-        )
-        .contract(contract)
-        .fixes(fix_hints("mutation").iter().copied());
+            last_lines(&output, 10),
+            contract,
+        );
     }
 
-    let Some(MutationSummary {
-        total,
-        caught,
-        missed,
-        unviable,
-    }) = lang.mutation_summary(&output)
-    else {
-        return GateResult::new(
-            "mutation",
-            INCOMPLETE,
+    let Some(summary) = lang.mutation_summary(&output) else {
+        return incomplete(
             format!("{} produced no summary", lang.mutation_tool()),
-            tail(&output),
-        )
-        .contract(contract)
-        .fixes(fix_hints("mutation").iter().copied());
+            last_lines(&output, 10),
+            contract,
+        );
     };
 
-    let rate = percent(caught, caught + missed);
+    let killed = summary.caught + summary.skipped;
+    let rate = percent(killed, killed + summary.missed);
+    let status = if rate < minimum { FAIL } else { PASS };
+    GateResult::new(
+        "mutation",
+        status,
+        format!("{rate:.1}% killed (min {minimum})"),
+        mutation_details(&summary, &output),
+    )
+    .contract(contract)
+    .fixes(Gate::Mutation.fix_hints().iter().copied())
+}
 
+/// The counts line plus every survivor the run listed. Mutants an `--iterate`
+/// run skipped were caught (or unviable) in a previous run and count as killed.
+fn mutation_details(summary: &MutationSummary, output: &str) -> Vec<String> {
+    let killed = summary.caught + summary.skipped;
+    let total = summary.total + summary.skipped;
+    let rate = percent(killed, killed + summary.missed);
+    let skipped_note = if summary.skipped > 0 {
+        format!(
+            ", {} previously caught or unviable (skipped)",
+            summary.skipped
+        )
+    } else {
+        String::new()
+    };
     let mut details = vec![format!(
-        "{total} mutants: {caught} caught, {missed} missed, {unviable} unviable -> {rate:.1}% killed"
+        "{total} mutants: {} caught, {} missed, {} unviable{skipped_note} -> {rate:.1}% killed",
+        summary.caught, summary.missed, summary.unviable
     )];
     details.extend(
         output
@@ -167,206 +205,15 @@ fn judge_mutation(
             .filter(|line| line.starts_with("MISSED"))
             .map(|line| line.trim().to_string()),
     );
-
-    let status = if rate < minimum { FAIL } else { PASS };
-    GateResult::new(
-        "mutation",
-        status,
-        format!("{rate:.1}% killed (min {minimum})"),
-        details,
-    )
-    .contract(contract)
-    .fixes(fix_hints("mutation").iter().copied())
+    details
 }
 
-fn tail(output: &str) -> Vec<String> {
-    last_lines(output, 10)
+/// An INCOMPLETE verdict carrying the tool's own tail as evidence.
+fn incomplete(summary: String, details: Vec<String>, contract: &str) -> GateResult {
+    GateResult::new("mutation", INCOMPLETE, summary, details)
+        .contract(contract)
+        .fixes(Gate::Mutation.fix_hints().iter().copied())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lang::Lang;
-    use crate::targets::Target;
-    use crate::test_support::{FakeRunner, MiniRepo};
-
-    fn repo() -> MiniRepo {
-        MiniRepo::build(None)
-    }
-
-    fn config_for(repo: &MiniRepo) -> Config {
-        Config::load(&repo.root, &Lang::Rust).expect("config loads")
-    }
-
-    fn gate_run_for<'a>(
-        repo: &'a MiniRepo,
-        config: &'a Config,
-        changed: &'a [String],
-    ) -> GateRun<'a> {
-        let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
-        crate::test_support::gate_run(&repo.root, target, config, changed)
-    }
-
-    const SUMMARY: &str = "120 mutants tested in 3m: 10 missed, 105 caught, 5 unviable\n";
-
-    #[test]
-    fn a_summary_that_omits_the_zero_categories_is_read() {
-        let repo = repo();
-        let output = "115 mutants tested in 6m: 96 caught, 19 unviable\n";
-        let runner = FakeRunner::with(&[("cargo mutants", 0, output)]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert_eq!(result.status, PASS);
-        assert!(result.summary.contains("100.0% killed (min 70)"));
-        assert!(result
-            .details
-            .iter()
-            .any(|line| line.contains("96 caught, 0 missed, 19 unviable")));
-    }
-
-    #[test]
-    fn a_kill_rate_above_the_minimum_passes_and_reports_the_numbers() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert_eq!(result.status, PASS);
-        assert!(result.summary.contains("91.3% killed (min 70)"));
-        assert!(result.details[0].contains("120 mutants: 105 caught, 10 missed, 5 unviable"));
-    }
-
-    #[test]
-    fn a_kill_rate_below_the_minimum_fails_and_lists_the_survivors() {
-        let repo = repo();
-        let output =
-            "100 mutants tested in 3m: 60 missed, 40 caught, 0 unviable\nMISSED  src/foo.rs:12:5 replace + with - in parse\n";
-        let runner = FakeRunner::with(&[("cargo mutants", 0, output)]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert_eq!(result.status, FAIL);
-        assert!(result.summary.contains("40.0% killed (min 70)"));
-        assert!(result
-            .details
-            .iter()
-            .any(|line| line.starts_with("MISSED  src/foo.rs")));
-    }
-
-    #[test]
-    fn an_endless_run_times_out_as_incomplete() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("cargo mutants", 124, "still going")]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert_eq!(result.status, INCOMPLETE);
-        assert!(result.summary.contains("timed out after 3600s"));
-    }
-
-    #[test]
-    fn output_without_a_summary_is_incomplete() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("cargo mutants", 0, "cargo-mutants: nothing to do")]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert_eq!(result.status, INCOMPLETE);
-        assert_eq!(result.summary, "cargo-mutants produced no summary");
-    }
-
-    #[test]
-    fn the_scope_setting_can_name_a_path_instead_of_the_diff() {
-        let repo = MiniRepo::build(Some(
-            "
-            version = 1
-
-            [mutation]
-            scope = \"src/parser.rs\"
-        ",
-        ));
-        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert!(result.contract.contains("--file src/parser.rs"));
-        assert!(result.contract.contains("scope=src/parser.rs"));
-    }
-
-    #[test]
-    fn the_all_scope_mutates_in_place_without_a_patch() {
-        let repo = MiniRepo::build(Some(
-            "
-            version = 1
-
-            [mutation]
-            scope = \"all\"
-        ",
-        ));
-        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert!(result.contract.contains("--in-place"));
-        assert!(!result.contract.contains("--in-diff"));
-        assert!(
-            !result.contract.contains("--file"),
-            "`all` scopes nothing: no path may ride along: {}",
-            result.contract
-        );
-    }
-
-    #[test]
-    fn the_mutant_timeout_is_passed_through() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
-
-        let result = gate_mutation(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-        assert!(result.contract.contains("--timeout 120"));
-    }
-
-    #[test]
-    fn explicit_paths_scope_the_mutants_to_the_named_files() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
-        let changed = vec!["src/foo.rs".to_string(), "README.md".to_string()];
-        let config = config_for(&repo);
-        let mut run = gate_run_for(&repo, &config, &changed);
-        run.scope = Scope::Paths;
-        let result = gate_mutation(&runner, &run);
-
-        assert!(
-            result.contract.contains("--file src/foo.rs"),
-            "{}",
-            result.contract
-        );
-        assert!(
-            !result.contract.contains("--in-diff"),
-            "{}",
-            result.contract
-        );
-        assert!(
-            !result.contract.contains("README.md"),
-            "{}",
-            result.contract
-        );
-    }
-
-    #[test]
-    fn explicit_paths_without_a_rust_file_never_run_the_mutants() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
-
-        let changed = vec!["README.md".to_string()];
-        let config = config_for(&repo);
-        let mut run = gate_run_for(&repo, &config, &changed);
-        run.scope = Scope::Paths;
-        let result = gate_mutation(&runner, &run);
-
-        assert_eq!(result.status, INCOMPLETE);
-        assert!(result.summary.contains("no rust file in the paths given"));
-        assert!(!runner.called_with("cargo mutants"));
-    }
-}
+mod tests;

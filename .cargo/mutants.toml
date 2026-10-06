@@ -1,0 +1,4 @@
+# cargo-mutants settings: how the mutation gate drives its tests.
+test_tool = "nextest"
+profile = "mutants"
+gitignore = true

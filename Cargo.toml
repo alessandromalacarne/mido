@@ -13,3 +13,8 @@ toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
+
+# The profile cargo-mutants builds and tests with: test behavior, no debug info.
+[profile.mutants]
+inherits = "test"
+debug = "none"

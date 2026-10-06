@@ -36,12 +36,16 @@ pub struct TestSummary {
 }
 
 /// The counts a mutation run reported.
+///
+/// `skipped` are mutants an `--iterate` run excluded as previously caught or
+/// unviable; they are not counted in `total`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MutationSummary {
     pub total: i64,
     pub caught: i64,
     pub missed: i64,
     pub unviable: i64,
+    pub skipped: i64,
 }
 
 /// How a mutation run is scoped.

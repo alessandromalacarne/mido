@@ -42,6 +42,7 @@
             rust-code-analysis
             cargo-llvm-cov
             cargo-mutants
+            cargo-nextest
             llvmPackages.llvm
           ];
 

@@ -1,5 +1,6 @@
 //! cargo-mutants: its summary line, and the arguments that scope it.
 
+use crate::error::GuardrailsError;
 use crate::lang::rust::is_source;
 use crate::lang::{MutationScope, MutationSummary};
 use crate::process::Command;
@@ -25,6 +26,15 @@ fn count_pattern() -> &'static Regex {
     PATTERN.get_or_init(|| Regex::new(r"(\d+) (caught|missed|unviable)").expect("valid pattern"))
 }
 
+/// The line an `--iterate` run prints for the mutants it did not rerun.
+fn iteration_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| {
+        Regex::new(r"Iteration excludes (\d+) previously caught or unviable mutants")
+            .expect("valid pattern")
+    })
+}
+
 /// The counts a cargo-mutants run reported, when it printed a summary.
 pub fn mutation_summary(output: &str) -> Option<MutationSummary> {
     let summary = summary_pattern().captures(output)?;
@@ -40,11 +50,16 @@ pub fn mutation_summary(output: &str) -> Option<MutationSummary> {
             _ => unviable = value,
         }
     }
+    let skipped = iteration_pattern()
+        .captures(output)
+        .map(|captures| captures[1].parse().unwrap_or_default())
+        .unwrap_or_default();
     Some(MutationSummary {
         total,
         caught,
         missed,
         unviable,
+        skipped,
     })
 }
 
@@ -52,15 +67,15 @@ fn git_args(args: &[String]) -> Vec<&str> {
     args.iter().map(String::as_str).collect()
 }
 
-/// `cargo mutants` in place, scoped by the config setting: a named path, or the
-/// changed files — a diff patch when there is a diff, the files themselves when
-/// the run was pointed at `--path`.
+/// `cargo mutants`, scoped by the config setting: a named path, or the changed
+/// files — a diff patch when there is a diff, the files themselves when the run
+/// was pointed at `--path`.
 pub fn scope_args(
     runner: &dyn Runner,
     repo: &Path,
     target: &Target,
     scoped: MutationScope<'_>,
-) -> Result<Vec<String>, std::io::Error> {
+) -> Result<Vec<String>, GuardrailsError> {
     let MutationScope {
         configured,
         scope,
@@ -69,17 +84,13 @@ pub fn scope_args(
     } = scoped;
     if configured != "changed" {
         if configured.is_empty() || configured == "all" {
-            return Ok(vec!["--in-place".to_string()]);
+            return Ok(Vec::new());
         }
-        return Ok(vec![
-            "--in-place".to_string(),
-            "--file".to_string(),
-            configured.to_string(),
-        ]);
+        return Ok(vec!["--file".to_string(), configured.to_string()]);
     }
 
     if scope == Scope::Paths {
-        let mut args = vec!["--in-place".to_string()];
+        let mut args = Vec::new();
         for path in changed {
             args.push("--file".to_string());
             args.push(path.clone());
@@ -96,8 +107,21 @@ fn changed_scope_args(
     repo: &Path,
     target: &Target,
     patch: &Path,
-) -> Result<Vec<String>, std::io::Error> {
-    let untracked: Vec<String> = process::git(
+) -> Result<Vec<String>, GuardrailsError> {
+    let untracked = untracked_sources(runner, repo, target);
+    stage_untracked(runner, repo, &untracked);
+    write_patch(runner, repo, target, patch)?;
+    release_untracked(runner, repo, &untracked);
+
+    Ok(vec![
+        "--in-diff".to_string(),
+        patch.to_string_lossy().to_string(),
+    ])
+}
+
+/// The untracked source files the target covers — they are part of the change.
+fn untracked_sources(runner: &dyn Runner, repo: &Path, target: &Target) -> Vec<String> {
+    process::git(
         runner,
         repo,
         &["ls-files", "--others", "--exclude-standard"],
@@ -105,34 +129,46 @@ fn changed_scope_args(
     .lines()
     .filter(|path| is_source(path) && covers(path, target))
     .map(str::to_string)
-    .collect();
+    .collect()
+}
 
-    if !untracked.is_empty() {
-        let mut add = vec!["add".to_string(), "-N".to_string()];
-        add.extend(untracked.iter().cloned());
-        process::git(runner, repo, &git_args(&add));
+/// Intent-to-add so the diff carries the new files.
+fn stage_untracked(runner: &dyn Runner, repo: &Path, untracked: &[String]) {
+    if untracked.is_empty() {
+        return;
     }
+    let mut add = vec!["add".to_string(), "-N".to_string()];
+    add.extend(untracked.iter().cloned());
+    process::git(runner, repo, &git_args(&add));
+}
 
+/// Leave the index as it was found: intent-to-add entries would otherwise show
+/// up as staged in whatever commit comes next.
+fn release_untracked(runner: &dyn Runner, repo: &Path, untracked: &[String]) {
+    if untracked.is_empty() {
+        return;
+    }
+    let mut reset = vec!["reset".to_string(), "-q".to_string(), "--".to_string()];
+    reset.extend(untracked.iter().cloned());
+    process::git(runner, repo, &git_args(&reset));
+}
+
+fn write_patch(
+    runner: &dyn Runner,
+    repo: &Path,
+    target: &Target,
+    patch: &Path,
+) -> Result<(), GuardrailsError> {
     let mut diff = vec!["git".to_string(), "diff".to_string()];
     if !target.path.is_empty() {
         diff.push(format!("--relative={}", target.path));
     }
     let result = runner.exec(&Command::new(repo, diff));
-    std::fs::write(patch, &result.stdout)?;
 
-    if !untracked.is_empty() {
-        // Leave the index as it was found: intent-to-add entries would otherwise
-        // show up as staged in whatever commit comes next.
-        let mut reset = vec!["reset".to_string(), "-q".to_string(), "--".to_string()];
-        reset.extend(untracked);
-        process::git(runner, repo, &git_args(&reset));
-    }
-
-    Ok(vec![
-        "--in-place".to_string(),
-        "--in-diff".to_string(),
-        patch.to_string_lossy().to_string(),
-    ])
+    std::fs::write(patch, &result.stdout).map_err(|error| {
+        GuardrailsError::setup("the changed-file patch could not be written")
+            .detail(format!("{}: {error}", patch.display()))
+    })
 }
 
 #[cfg(test)]
@@ -187,7 +223,7 @@ mod tests {
         )
         .expect("patch written");
 
-        assert!(args[0] == "--in-place" && args[1] == "--in-diff");
+        assert!(args[0] == "--in-diff" && args[1].ends_with("patch"));
         let patch = std::fs::read_to_string(scratch.join("patch")).expect("patch");
         assert!(patch.contains("diff --git"));
     }
