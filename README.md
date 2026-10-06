@@ -8,6 +8,12 @@ Like the Kokiri who won't let you into the forest without proof you're ready,
 verification ladder described by `.mido.toml` against one target of the
 repo, and blocks the way until every gate passes.
 
+## Documentation
+
+The full reference lives in the [wiki](https://github.com/alessandromalacarne/mido/wiki):
+getting started, CLI, configuration, targets, gates, reports, the MCP server,
+troubleshooting and development.
+
 ## Built for LLM agents
 
 mido assumes an LLM wrote the change and an LLM reads the result.
