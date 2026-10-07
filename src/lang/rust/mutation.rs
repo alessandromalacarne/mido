@@ -1,68 +1,27 @@
-//! cargo-mutants: its summary line, and the arguments that scope it.
+//! cargo-mutants: its report files, and the arguments that scope a run.
 
 pub mod report;
 
 use crate::error::GuardrailsError;
 use crate::lang::rust::is_source;
-use crate::lang::{MutationScope, MutationSummary};
+use crate::lang::MutationScope;
 use crate::process::Command;
 use crate::process::{self, Runner};
 use crate::targets::{covers, Scope, Target};
-use regex::Regex;
 use std::path::Path;
-use std::sync::OnceLock;
 
 pub const TOOL: &str = "cargo-mutants";
 pub const TIMEOUT_SECS: i64 = 120;
 
-/// The summary line: `115 mutants tested in 6m: 96 caught, 19 unviable` —
-/// cargo-mutants leaves zero-valued categories (`0 missed`) out.
-fn summary_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN
-        .get_or_init(|| Regex::new(r"(\d+) mutants tested in [^:]+: (.+)").expect("valid pattern"))
-}
+/// The arguments a declared test command carries to `cargo test`: everything
+/// after the `cargo test` it names. A command that names none carries nothing —
+/// the mutation tool's own default test command then applies.
+pub fn test_args(command: &[String]) -> Option<Vec<String>> {
+    let start = command
+        .windows(2)
+        .position(|pair| pair[0] == "cargo" && pair[1] == "test")?;
 
-fn count_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r"(\d+) (caught|missed|unviable)").expect("valid pattern"))
-}
-
-/// The line an `--iterate` run prints for the mutants it did not rerun.
-fn iteration_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| {
-        Regex::new(r"Iteration excludes (\d+) previously caught or unviable mutants")
-            .expect("valid pattern")
-    })
-}
-
-/// The counts a cargo-mutants run reported, when it printed a summary.
-pub fn mutation_summary(output: &str) -> Option<MutationSummary> {
-    let summary = summary_pattern().captures(output)?;
-    let total: i64 = summary[1].parse().unwrap_or_default();
-    let mut caught = 0;
-    let mut missed = 0;
-    let mut unviable = 0;
-    for count in count_pattern().captures_iter(&summary[2]) {
-        let value: i64 = count[1].parse().unwrap_or_default();
-        match &count[2] {
-            "caught" => caught = value,
-            "missed" => missed = value,
-            _ => unviable = value,
-        }
-    }
-    let skipped = iteration_pattern()
-        .captures(output)
-        .map(|captures| captures[1].parse().unwrap_or_default())
-        .unwrap_or_default();
-    Some(MutationSummary {
-        total,
-        caught,
-        missed,
-        unviable,
-        skipped,
-    })
+    Some(command[start + 2..].to_vec())
 }
 
 fn git_args(args: &[String]) -> Vec<&str> {
@@ -184,152 +143,4 @@ fn write_patch(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::process::Outcome;
-    use crate::test_support::{FakeRunner, MiniRepo};
-    use std::path::PathBuf;
-
-    fn repo() -> MiniRepo {
-        MiniRepo::build(None)
-    }
-
-    fn scratch(repo: &MiniRepo) -> PathBuf {
-        let scratch = repo.root.join("scratch");
-        std::fs::create_dir_all(&scratch).expect("scratch");
-        scratch
-    }
-
-    #[test]
-    fn a_summary_that_omits_the_zero_categories_is_read() {
-        let summary = mutation_summary("115 mutants tested in 6m: 96 caught, 19 unviable\n")
-            .expect("summary");
-
-        assert_eq!(summary.total, 115);
-        assert_eq!(summary.caught, 96);
-        assert_eq!(summary.missed, 0);
-        assert_eq!(summary.unviable, 19);
-    }
-
-    #[test]
-    fn output_without_a_summary_line_is_nothing() {
-        assert_eq!(mutation_summary("cargo-mutants: nothing to do"), None);
-    }
-
-    #[test]
-    fn a_whole_target_scope_mutates_the_package_without_a_patch() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("git diff", 0, "diff --git a/src/foo.rs b/src/foo.rs\n")]);
-
-        let args = scope_args(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(crate::lang::rust::MANIFEST),
-            MutationScope {
-                configured: "changed",
-                scope: Scope::Whole,
-                changed: &["src/foo.rs".to_string()],
-                patch: &scratch(&repo).join("patch"),
-            },
-        )
-        .expect("no patch to write");
-
-        assert!(args.is_empty(), "{args:?}");
-        assert!(!runner.called_with("git diff"), "no diff is read");
-    }
-
-    #[test]
-    fn the_changed_scope_writes_the_working_tree_patch_first() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[("git diff", 0, "diff --git a/src/foo.rs b/src/foo.rs\n")]);
-        let scratch = scratch(&repo);
-
-        let args = scope_args(
-            &runner,
-            &repo.root,
-            &Target::workspace_target(crate::lang::rust::MANIFEST),
-            MutationScope {
-                configured: "changed",
-                scope: Scope::Diff,
-                changed: &[],
-                patch: &scratch.join("patch"),
-            },
-        )
-        .expect("patch written");
-
-        assert!(args[0] == "--in-diff" && args[1].ends_with("patch"));
-        let patch = std::fs::read_to_string(scratch.join("patch")).expect("patch");
-        assert!(patch.contains("diff --git"));
-    }
-
-    #[test]
-    fn the_member_patch_is_filtered_without_rewriting_the_paths() {
-        let repo = repo();
-        let runner = FakeRunner::with(&[(
-            "git diff",
-            0,
-            "diff --git a/frontend/src/foo.rs b/frontend/src/foo.rs\n",
-        )]);
-        let scratch = scratch(&repo);
-
-        scope_args(
-            &runner,
-            &repo.root,
-            &Target::crate_target("frontend", true, crate::lang::rust::MANIFEST),
-            MutationScope {
-                configured: "changed",
-                scope: Scope::Diff,
-                changed: &[],
-                patch: &scratch.join("patch"),
-            },
-        )
-        .expect("patch written");
-
-        assert!(
-            runner.called_with("git diff -- frontend"),
-            "the pathspec scopes the patch without rewriting its paths"
-        );
-        assert!(
-            !runner.called_with("--relative"),
-            "the patch must stay relative to the cargo workspace root: that is \
-             the root cargo-mutants resolves --in-diff paths against"
-        );
-    }
-
-    #[test]
-    fn untracked_rust_files_are_added_to_the_index_and_then_released() {
-        let repo = repo();
-        let runner = FakeRunner {
-            responses: vec![
-                (
-                    "ls-files".to_string(),
-                    Outcome::new(0, "frontend/src/new.rs\nfrontend/NOTES.md\nREADME.md\n", ""),
-                ),
-                ("git diff".to_string(), Outcome::new(0, "diff\n", "")),
-            ],
-            ..FakeRunner::default()
-        };
-
-        scope_args(
-            &runner,
-            &repo.root,
-            &Target::crate_target("frontend", false, crate::lang::rust::MANIFEST),
-            MutationScope {
-                configured: "changed",
-                scope: Scope::Diff,
-                changed: &[],
-                patch: &scratch(&repo).join("patch"),
-            },
-        )
-        .expect("patch written");
-
-        assert!(runner.called_with("add -N frontend/src/new.rs"));
-        assert!(
-            !runner.called_with("frontend/NOTES.md"),
-            "only source files are staged, even when the target covers them"
-        );
-        assert!(!runner.called_with("add -N README.md"));
-        assert!(runner.called_with("reset -q -- frontend/src/new.rs"));
-        assert!(runner.called_with("git diff -- frontend"));
-    }
-}
+mod tests;

@@ -73,7 +73,7 @@ fn failure_report_flags_incomplete_gates_as_not_passed() {
         &[GateResult::new(
             "mutation",
             INCOMPLETE,
-            "cargo-mutants produced no summary",
+            "cargo-mutants produced no report",
             Vec::<String>::new(),
         )],
         &FailureContext::default(),

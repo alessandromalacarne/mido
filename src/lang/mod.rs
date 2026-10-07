@@ -35,19 +35,6 @@ pub struct TestSummary {
     pub failed_names: Vec<String>,
 }
 
-/// The counts a mutation run reported.
-///
-/// `skipped` are mutants an `--iterate` run excluded as previously caught or
-/// unviable; they are not counted in `total`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct MutationSummary {
-    pub total: i64,
-    pub caught: i64,
-    pub missed: i64,
-    pub unviable: i64,
-    pub skipped: i64,
-}
-
 /// What one mutation run reported: the counts its report files carry, the
 /// mutants it left alive, and the exclusion list an `--iterate` pass read at
 /// its start.
@@ -240,18 +227,19 @@ impl Lang {
         }
     }
 
-    /// Parse a mutation run's output; `None` when it printed no summary.
-    pub fn mutation_summary(self, output: &str) -> Option<MutationSummary> {
-        match self {
-            Lang::Rust => rust::mutation::mutation_summary(output),
-        }
-    }
-
     /// The report a mutation run wrote into its output directory; `None` when
     /// it wrote none, or died before finishing.
     pub fn mutation_report(self, output_dir: &Path) -> Option<MutationReport> {
         match self {
             Lang::Rust => rust::mutation::report::read(output_dir),
+        }
+    }
+
+    /// The arguments a declared test command carries to the test tool; `None`
+    /// when the command names none, so the tool's own default applies.
+    pub fn mutation_test_args(self, command: &[String]) -> Option<Vec<String>> {
+        match self {
+            Lang::Rust => rust::mutation::test_args(command),
         }
     }
 

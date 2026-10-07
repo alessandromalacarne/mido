@@ -1,19 +1,19 @@
 //! Gate 6 — do the tests actually detect broken code?
 
+mod judgment;
+
 use crate::config::Config;
 use crate::error::GuardrailsError;
 use crate::gate::Gate;
 use crate::gates::GateRun;
-use crate::lang::{Lang, MutationScope, MutationSummary};
-use crate::metrics::percent;
-use crate::process::last_lines;
-use crate::process::{self, Runner};
-use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
+use crate::lang::{Lang, MutationScope};
+use crate::process::Runner;
+use crate::report::{GateResult, INCOMPLETE};
 use crate::targets::{Scope, Target};
+use std::path::Path;
 
 pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
     let GateRun {
-        repo,
         target,
         config,
         lang,
@@ -35,20 +35,23 @@ pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
         return nothing_mutable(config, lang, scope);
     }
 
-    let args = match mutation_command(runner, run, lang, &configured, &mutable) {
-        Ok(args) => args,
+    // The run owns its cargo-mutants state: a fresh output directory, so a
+    // verdict can only ever come from the mutants this run tested.
+    let output = run
+        .scratch
+        .join(format!("guardrails-mutants-{}", target.name));
+    let _ = std::fs::remove_dir_all(&output);
+
+    let passes = match mutation_passes(runner, run, lang, &configured, &mutable, &output) {
+        Ok(passes) => passes,
         Err(error) => return unpatched(error),
     };
-    let contract = mutation_contract(config, minimum, &configured, &args);
+    let contract = mutation_contract(config, minimum, &configured, &passes);
 
-    let result = process::dev(
-        runner,
-        lang.env_tool(),
-        &target.dir(repo),
-        &args,
-        Some(timeout.max(0) as u64),
-    );
-    judge_mutation(&result, &contract, minimum, timeout, lang)
+    match judgment::mutation_reports(runner, run, &passes, timeout, &output) {
+        Ok(reports) => judgment::judge_mutation(&reports, &contract, minimum),
+        Err(unjudged) => judgment::incomplete(unjudged.summary, unjudged.details, &contract),
+    }
 }
 
 /// The changed files the mutation tool can mutate.
@@ -75,24 +78,99 @@ fn mutation_settings(config: &Config, target: &Target) -> MutationSettings {
     }
 }
 
-/// The contract line the gate cites, whatever its verdict.
-fn mutation_contract(config: &Config, minimum: f64, configured: &str, args: &[String]) -> String {
+/// The contract line the gate cites, whatever its verdict: every pass it made.
+fn mutation_contract(
+    config: &Config,
+    minimum: f64,
+    configured: &str,
+    passes: &[MutationPass],
+) -> String {
+    let commands = passes
+        .iter()
+        .map(|pass| pass.args.join(" "))
+        .collect::<Vec<_>>()
+        .join(" ; ");
     format!(
-        "{} [mutation] kill_rate_min={minimum}, scope={configured} via `{}`",
-        config.source(),
-        args.join(" ")
+        "{} [mutation] kill_rate_min={minimum}, scope={configured} via `{commands}`",
+        config.source()
     )
 }
 
-/// The mutation command: the module's command plus its scope flags and the
-/// per-mutant timeout.
-fn mutation_command(
+/// One mutation pass: the cargo-mutants argv, and the test command it puts in
+/// front of the mutants.
+struct MutationPass {
+    command: Vec<String>,
+    args: Vec<String>,
+}
+
+/// The passes a mutation run makes: one per test command the target declares,
+/// each scoped, timed and given the run's own output directory. Every pass but
+/// the first carries `--iterate`, so the mutants an earlier pass caught come
+/// back as skipped — and skipped counts as killed.
+fn mutation_passes(
     runner: &dyn Runner,
     run: &GateRun<'_>,
     lang: Lang,
     configured: &str,
     mutable: &[String],
-) -> Result<Vec<String>, GuardrailsError> {
+    output: &Path,
+) -> Result<Vec<MutationPass>, GuardrailsError> {
+    let (base, scope_args) = scoped_command(runner, run, lang, configured, mutable)?;
+    if names_own_output(&base) {
+        return Err(GuardrailsError::setup(
+            "the configured mutation command names its own --output",
+        )
+        .detail(
+            "mido owns the mutation state: a verdict may only be decided by the \
+             mutants a run itself started",
+        )
+        .hint(
+            "drop --output from [mutation] command — mido writes into its own scratch directory",
+        ));
+    }
+
+    let mut driven: Vec<Vec<String>> = Vec::new();
+    let mut passes: Vec<MutationPass> = Vec::new();
+
+    for command in lang.test_commands(run.config, run.target, run.repo) {
+        let test_args = lang.mutation_test_args(&command).unwrap_or_default();
+        if driven.contains(&test_args) {
+            continue;
+        }
+
+        let iterate = !passes.is_empty();
+        let args = pass_args(&base, &scope_args, &test_args, iterate, output, lang);
+        passes.push(MutationPass { command, args });
+        driven.push(test_args);
+    }
+
+    if passes.is_empty() {
+        let args = pass_args(&base, &scope_args, &[], false, output, lang);
+        passes.push(MutationPass {
+            command: Vec::new(),
+            args,
+        });
+    }
+
+    Ok(passes)
+}
+
+/// Whether the configured command names its own output directory — in any of
+/// the forms cargo-mutants' parser accepts.
+fn names_own_output(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| arg.starts_with("-o") || arg.starts_with("--output"))
+}
+
+/// The configured mutation command, and the flags that scope it to this run's
+/// changed files.
+fn scoped_command(
+    runner: &dyn Runner,
+    run: &GateRun<'_>,
+    lang: Lang,
+    configured: &str,
+    mutable: &[String],
+) -> Result<(Vec<String>, Vec<String>), GuardrailsError> {
     let GateRun {
         repo,
         target,
@@ -101,7 +179,7 @@ fn mutation_command(
         scratch,
         ..
     } = *run;
-    let mut args = config
+    let base = config
         .argv("mutation", "command", target)
         .or_else(|| lang.fallback_argv("mutation", "command"))
         .unwrap_or_default();
@@ -112,11 +190,37 @@ fn mutation_command(
         changed: mutable,
         patch: &patch,
     };
-    args.extend(lang.mutation_scope_args(runner, repo, target, scoped)?);
 
+    Ok((
+        base,
+        lang.mutation_scope_args(runner, repo, target, scoped)?,
+    ))
+}
+
+/// One pass's argv: the configured command, scoped and timed, carrying the run's
+/// output directory and the test arguments of the suite it drives.
+fn pass_args(
+    base: &[String],
+    scope_args: &[String],
+    test_args: &[String],
+    iterate: bool,
+    output: &Path,
+    lang: Lang,
+) -> Vec<String> {
+    let mut args = base.to_vec();
+    if iterate && !args.iter().any(|arg| arg == "--iterate") {
+        args.push("--iterate".to_string());
+    }
+    args.push("--output".to_string());
+    args.push(output.to_string_lossy().to_string());
+    args.extend(scope_args.iter().cloned());
     args.push("--timeout".to_string());
     args.push(lang.mutation_timeout().to_string());
-    Ok(args)
+    if !test_args.is_empty() {
+        args.push("--".to_string());
+        args.extend(test_args.iter().cloned());
+    }
+    args
 }
 
 /// The verdict for a patch that could not be written: INCOMPLETE, never a pass.
@@ -144,78 +248,6 @@ fn nothing_mutable(config: &Config, lang: Lang, scope: Scope) -> GateResult {
         config.source()
     ))
     .fixes(Gate::Mutation.fix_hints().iter().copied())
-}
-
-fn judge_mutation(
-    result: &process::Outcome,
-    contract: &str,
-    minimum: f64,
-    timeout: i64,
-    lang: Lang,
-) -> GateResult {
-    let output = result.combined();
-
-    if result.code == process::TIMEOUT_EXIT {
-        return incomplete(
-            format!("timed out after {timeout}s"),
-            last_lines(&output, 10),
-            contract,
-        );
-    }
-
-    let Some(summary) = lang.mutation_summary(&output) else {
-        return incomplete(
-            format!("{} produced no summary", lang.mutation_tool()),
-            last_lines(&output, 10),
-            contract,
-        );
-    };
-
-    let killed = summary.caught + summary.skipped;
-    let rate = percent(killed, killed + summary.missed);
-    let status = if rate < minimum { FAIL } else { PASS };
-    GateResult::new(
-        "mutation",
-        status,
-        format!("{rate:.1}% killed (min {minimum})"),
-        mutation_details(&summary, &output),
-    )
-    .contract(contract)
-    .fixes(Gate::Mutation.fix_hints().iter().copied())
-}
-
-/// The counts line plus every survivor the run listed. Mutants an `--iterate`
-/// run skipped were caught (or unviable) in a previous run and count as killed.
-fn mutation_details(summary: &MutationSummary, output: &str) -> Vec<String> {
-    let killed = summary.caught + summary.skipped;
-    let total = summary.total + summary.skipped;
-    let rate = percent(killed, killed + summary.missed);
-    let skipped_note = if summary.skipped > 0 {
-        format!(
-            ", {} previously caught or unviable (skipped)",
-            summary.skipped
-        )
-    } else {
-        String::new()
-    };
-    let mut details = vec![format!(
-        "{total} mutants: {} caught, {} missed, {} unviable{skipped_note} -> {rate:.1}% killed",
-        summary.caught, summary.missed, summary.unviable
-    )];
-    details.extend(
-        output
-            .lines()
-            .filter(|line| line.starts_with("MISSED"))
-            .map(|line| line.trim().to_string()),
-    );
-    details
-}
-
-/// An INCOMPLETE verdict carrying the tool's own tail as evidence.
-fn incomplete(summary: String, details: Vec<String>, contract: &str) -> GateResult {
-    GateResult::new("mutation", INCOMPLETE, summary, details)
-        .contract(contract)
-        .fixes(Gate::Mutation.fix_hints().iter().copied())
 }
 
 #[cfg(test)]
