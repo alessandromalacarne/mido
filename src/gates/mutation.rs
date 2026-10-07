@@ -29,9 +29,10 @@ pub fn gate_mutation(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
     let mutable = mutable_sources(changed, lang);
 
     // A run pointed at paths has no diff to patch, so the files themselves are
-    // the scope. Nothing mutable is nothing to measure — never a pass.
-    if scope == Scope::Paths && mutable.is_empty() {
-        return nothing_mutable(config, lang);
+    // the scope; a whole-target run mutates the package entire. Nothing mutable
+    // is nothing to measure — never a pass.
+    if scope != Scope::Diff && mutable.is_empty() {
+        return nothing_mutable(config, lang, scope);
     }
 
     let args = match mutation_command(runner, run, lang, &configured, &mutable) {
@@ -124,20 +125,22 @@ fn unpatched(error: GuardrailsError) -> GateResult {
         .fixes(Gate::Mutation.fix_hints().iter().copied())
 }
 
-/// The verdict for a path scope with nothing the mutation tool can mutate.
-fn nothing_mutable(config: &Config, lang: Lang) -> GateResult {
+/// The verdict for a scope with nothing the mutation tool can mutate.
+fn nothing_mutable(config: &Config, lang: Lang, scope: Scope) -> GateResult {
     let label = lang.source_label();
     let tool = lang.mutation_tool();
+    let (place, contract) = match scope {
+        Scope::Paths => ("the paths given", "explicit paths"),
+        _ => ("the target", "whole target"),
+    };
     GateResult::new(
         "mutation",
         INCOMPLETE,
-        format!("no {label} file in the paths given — nothing to mutate"),
-        [format!(
-            "{tool} mutates {label} files; the paths given hold none"
-        )],
+        format!("no {label} file in {place} — nothing to mutate"),
+        [format!("{tool} mutates {label} files; {place} holds none")],
     )
     .contract(format!(
-        "{} [mutation] scope=explicit paths, no {label} file to mutate",
+        "{} [mutation] scope={contract}, no {label} file to mutate",
         config.source()
     ))
     .fixes(Gate::Mutation.fix_hints().iter().copied())

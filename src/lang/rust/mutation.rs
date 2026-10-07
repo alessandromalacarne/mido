@@ -68,8 +68,8 @@ fn git_args(args: &[String]) -> Vec<&str> {
 }
 
 /// `cargo mutants`, scoped by the config setting: a named path, or the changed
-/// files — a diff patch when there is a diff, the files themselves when the run
-/// was pointed at `--path`.
+/// files — a diff patch when there is a diff, the whole package when the run
+/// reads no diff, the files themselves when the run was pointed at `--path`.
 pub fn scope_args(
     runner: &dyn Runner,
     repo: &Path,
@@ -87,6 +87,11 @@ pub fn scope_args(
             return Ok(Vec::new());
         }
         return Ok(vec!["--file".to_string(), configured.to_string()]);
+    }
+
+    if scope == Scope::Whole {
+        // No diff to patch and no path list to narrow: the whole package.
+        return Ok(Vec::new());
     }
 
     if scope == Scope::Paths {
