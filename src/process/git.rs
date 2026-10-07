@@ -65,6 +65,26 @@ pub fn changed_files(runner: &dyn Runner, repo: &Path, base: &str) -> Vec<String
     files
 }
 
+/// Every file git can see — the tracked ones, plus untracked ones that are not
+/// ignored.
+pub fn all_files(runner: &dyn Runner, repo: &Path) -> Vec<String> {
+    let tracked = git(runner, repo, &["ls-files"]);
+    let untracked = git(
+        runner,
+        repo,
+        &["ls-files", "--others", "--exclude-standard"],
+    );
+
+    let mut files: Vec<String> = [tracked, untracked]
+        .iter()
+        .flat_map(|output| output.lines().map(|line| line.to_string()))
+        .filter(|line| !line.is_empty())
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
 pub fn pick_base(runner: &dyn Runner, repo: &Path) -> String {
     for candidate in ["origin/mvp", "origin/develop", "origin/master"] {
         let result = runner.exec(&Command::new(
