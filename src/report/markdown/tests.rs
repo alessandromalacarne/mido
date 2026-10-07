@@ -49,3 +49,32 @@ fn a_report_without_a_base_names_the_explicit_paths() {
     assert!(report.contains("scope: `explicit paths`"), "{report}");
     assert!(!report.contains("base:"), "{report}");
 }
+
+#[test]
+fn a_whole_target_report_names_the_scope_and_the_measured_files() {
+    let report = render_report_markdown(
+        &[GateResult::new(
+            "tests",
+            PASS,
+            "1 passed",
+            Vec::<String>::new(),
+        )],
+        &ReportContext {
+            target: &Target::workspace_target("Cargo.toml"),
+            scope: Scope::Whole,
+            base: "",
+            revision: "fa5bac38",
+            dirty: "abc123",
+            changed: &["lib/src/foo.rs".to_string()],
+            source_label: "rust",
+            source_count: 1,
+        },
+    );
+
+    assert!(
+        report.contains("scope: `whole target (no diff)`"),
+        "{report}"
+    );
+    assert!(report.contains("measured files: 1 (1 rust)"), "{report}");
+    assert!(!report.contains("changed files:"), "{report}");
+}

@@ -52,6 +52,7 @@ fn help_names_the_verdict_vocabulary() {
     assert!(stdout(&output).contains("SHIP-READY"));
     assert!(stdout(&output).contains("--path"));
     assert!(stdout(&output).contains("--lang"));
+    assert!(stdout(&output).contains("--no-diff"));
 }
 
 #[test]
@@ -123,6 +124,62 @@ fn the_binary_measures_explicit_paths_without_a_diff() {
     let output = run(
         repo.path(),
         &["--path", "lib/src/lib.rs", "--gate", "tests"],
+    );
+    let printed = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{printed}");
+    assert!(printed.contains("scope    explicit paths"), "{printed}");
+    assert!(printed.contains("  src/lib.rs"), "{printed}");
+    assert!(!printed.contains("src/other.rs"), "{printed}");
+}
+
+#[test]
+fn the_binary_measures_the_whole_target_without_a_diff() {
+    let repo = mini_repo();
+    write(
+        repo.path().join("lib/src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+    );
+    write(
+        repo.path().join("lib/src/other.rs"),
+        "pub fn other() -> i32 {\n    1\n}\n",
+    );
+    commit_all(repo.path());
+    // A change the diff would report; the whole run measures every file anyway.
+    write(
+        repo.path().join("lib/src/other.rs"),
+        "pub fn other() -> i32 {\n    2\n}\n",
+    );
+
+    let output = run(repo.path(), &["--no-diff", "lib", "--gate", "tests"]);
+    let printed = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{printed}");
+    assert!(
+        printed.contains("scope    whole target (no diff)"),
+        "{printed}"
+    );
+    assert!(printed.contains("measured 3 files (2 rust)"), "{printed}");
+    assert!(printed.contains("  src/lib.rs"), "{printed}");
+    assert!(printed.contains("  src/other.rs"), "{printed}");
+}
+
+#[test]
+fn a_no_diff_run_can_measure_one_file() {
+    let repo = mini_repo();
+    write(
+        repo.path().join("lib/src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+    );
+    write(
+        repo.path().join("lib/src/other.rs"),
+        "pub fn other() -> i32 {\n    1\n}\n",
+    );
+    commit_all(repo.path());
+
+    let output = run(
+        repo.path(),
+        &["--no-diff", "--path", "lib/src/lib.rs", "--gate", "tests"],
     );
     let printed = stdout(&output);
 

@@ -97,6 +97,140 @@ fn a_target_owning_none_of_the_diff_leaves_nothing_ship_ready() {
 }
 
 #[test]
+fn a_no_diff_run_measures_the_whole_target() {
+    let repo = MiniRepo::build(Some(
+        "
+            version = 1
+
+            [tests]
+            command = [\"cargo\", \"test\"]
+        ",
+    ));
+    let runner = FakeRunner::with(&[
+        ("--others", 0, ""),
+        ("ls-files", 0, "lib/src/foo.rs\nlib/src/bar.rs\n"),
+        ("hash-object", 0, "dirtyhash\n"),
+        ("cargo test", 0, "test result: ok. 3 passed; 0 failed\n"),
+    ]);
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "lib",
+            "--no-diff",
+            "--gate",
+            "tests",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("whole target (no diff)"), "{out}");
+    assert!(out.contains("src/foo.rs"), "{out}");
+    assert!(out.contains("src/bar.rs"), "{out}");
+    assert!(
+        runner.called_with("ls-files"),
+        "the file set comes from git"
+    );
+    assert!(!runner.called_with("merge-base"), "no diff was read");
+}
+
+#[test]
+fn a_no_diff_run_can_measure_one_file() {
+    let repo = MiniRepo::build(Some(
+        "
+            version = 1
+
+            [tests]
+            command = [\"cargo\", \"test\"]
+        ",
+    ));
+    std::fs::create_dir_all(repo.root.join("lib/src")).expect("member src dir");
+    std::fs::write(
+        repo.root.join("lib/src/bar.rs"),
+        "pub fn bar() -> i64 {\n    1\n}\n",
+    )
+    .expect("named file");
+    let runner = FakeRunner::with(&[
+        ("hash-object", 0, "dirtyhash\n"),
+        ("cargo test", 0, "test result: ok. 1 passed; 0 failed\n"),
+    ]);
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--no-diff",
+            "--path",
+            "lib/src/bar.rs",
+            "--gate",
+            "tests",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("explicit paths"), "{out}");
+    assert!(out.contains("src/bar.rs"), "{out}");
+    assert!(!out.contains("src/foo.rs"), "{out}");
+}
+
+#[test]
+fn a_no_diff_run_defaults_to_the_workspace_roll_up() {
+    let repo = MiniRepo::build(Some(
+        "
+            version = 1
+
+            [tests]
+            command = [\"cargo\", \"test\"]
+        ",
+    ));
+    let runner = FakeRunner::with(&[
+        ("--others", 0, ""),
+        ("ls-files", 0, "lib/src/foo.rs\n"),
+        ("hash-object", 0, "dirtyhash\n"),
+        ("cargo test", 0, "test result: ok. 1 passed; 0 failed\n"),
+    ]);
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--no-diff",
+            "--gate",
+            "tests",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("whole target (no diff)"), "{out}");
+    assert!(out.contains("workspace (./)"), "{out}");
+}
+
+#[test]
+fn a_no_diff_run_with_no_visible_file_measures_nothing() {
+    let repo = MiniRepo::build(None);
+    let runner = FakeRunner::with(&[("hash-object", 0, "dirtyhash\n")]);
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--no-diff",
+            "--gate",
+            "tests",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("git lists no file"), "{out}");
+    assert!(out.contains("nothing to measure"), "{out}");
+}
+
+#[test]
 fn a_passing_run_writes_the_report_and_says_so() {
     let repo = MiniRepo::build(Some(
         "

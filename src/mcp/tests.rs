@@ -74,6 +74,8 @@ fn tools_list_exposes_the_ladder_and_target_discovery() {
     assert_eq!(run["gates"]["items"]["enum"][5], "mutation");
     assert_eq!(run["target"]["default"], "auto");
     assert_eq!(run["repo"]["type"], "string");
+    assert_eq!(run["no_diff"]["type"], "boolean");
+    assert_eq!(run["no_diff"]["default"], false);
     assert_eq!(
         tools[0]["inputSchema"]["properties"]["repo"]["type"],
         "string"
@@ -119,6 +121,19 @@ fn run_ladder_defaults_to_json_and_can_run_every_target() {
 
     assert_eq!(stub.argv(), ["--all", "--apply-workspace-aid", "--json"]);
     assert_eq!(response["result"]["isError"], false);
+}
+
+#[test]
+fn run_ladder_carries_the_no_diff_switch_and_the_paths_it_composes_with() {
+    let stub = Stub::new(0);
+    handle_line(
+        r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{
+            "name":"run_ladder","arguments":{"no_diff":true,"paths":["src/a.rs"]}}}"#,
+        &stub,
+    )
+    .expect("answered");
+
+    assert_eq!(stub.argv(), ["--path", "src/a.rs", "--no-diff", "--json"]);
 }
 
 #[test]

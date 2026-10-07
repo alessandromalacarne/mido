@@ -243,3 +243,50 @@ fn explicit_paths_without_a_rust_file_never_run_the_mutants() {
     assert!(result.summary.contains("no rust file in the paths given"));
     assert!(!runner.called_with("cargo mutants"));
 }
+
+#[test]
+fn a_whole_target_scope_mutates_the_package_without_a_patch() {
+    let repo = repo();
+    let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+    let changed = vec!["src/foo.rs".to_string()];
+    let config = config_for(&repo);
+    let mut run = gate_run_for(&repo, &config, &changed);
+    run.scope = Scope::Whole;
+    let result = gate_mutation(&runner, &run);
+
+    assert!(
+        !result.contract.contains("--in-diff"),
+        "no diff, no patch: {}",
+        result.contract
+    );
+    assert!(
+        !result.contract.contains("--file"),
+        "the package is the scope: {}",
+        result.contract
+    );
+    assert!(
+        result.contract.contains("--timeout 120"),
+        "{}",
+        result.contract
+    );
+}
+
+#[test]
+fn a_whole_target_without_a_rust_file_never_runs_the_mutants() {
+    let repo = repo();
+    let runner = FakeRunner::with(&[("cargo mutants", 0, SUMMARY)]);
+
+    let changed = vec!["README.md".to_string()];
+    let config = config_for(&repo);
+    let mut run = gate_run_for(&repo, &config, &changed);
+    run.scope = Scope::Whole;
+    let result = gate_mutation(&runner, &run);
+
+    assert_eq!(result.status, INCOMPLETE);
+    assert!(
+        result.summary.contains("no rust file in the target"),
+        "{}",
+        result.summary
+    );
+    assert!(!runner.called_with("cargo mutants"));
+}

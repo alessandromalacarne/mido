@@ -215,6 +215,28 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_target_scope_mutates_the_package_without_a_patch() {
+        let repo = repo();
+        let runner = FakeRunner::with(&[("git diff", 0, "diff --git a/src/foo.rs b/src/foo.rs\n")]);
+
+        let args = scope_args(
+            &runner,
+            &repo.root,
+            &Target::workspace_target(crate::lang::rust::MANIFEST),
+            MutationScope {
+                configured: "changed",
+                scope: Scope::Whole,
+                changed: &["src/foo.rs".to_string()],
+                patch: &scratch(&repo).join("patch"),
+            },
+        )
+        .expect("no patch to write");
+
+        assert!(args.is_empty(), "{args:?}");
+        assert!(!runner.called_with("git diff"), "no diff is read");
+    }
+
+    #[test]
     fn the_changed_scope_writes_the_working_tree_patch_first() {
         let repo = repo();
         let runner = FakeRunner::with(&[("git diff", 0, "diff --git a/src/foo.rs b/src/foo.rs\n")]);

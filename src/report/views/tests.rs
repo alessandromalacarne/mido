@@ -151,6 +151,27 @@ fn the_banner_is_a_panel_of_labelled_fields() {
 }
 
 #[test]
+fn a_whole_target_banner_names_its_scope_and_measured_files() {
+    let banner = render_banner(
+        &Target::workspace_target("Cargo.toml"),
+        &BannerContext {
+            scope: Scope::Whole,
+            changed: &["src/foo.rs".to_string()],
+            source_label: "rust",
+            source_count: 1,
+            ..BannerContext::default()
+        },
+        Style::plain(),
+    );
+
+    assert!(
+        banner.contains("│ scope    whole target (no diff)"),
+        "{banner}"
+    );
+    assert!(banner.contains("│ measured 1 files (1 rust)"), "{banner}");
+}
+
+#[test]
 fn the_panels_shorten_the_hashes_for_the_eye() {
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),

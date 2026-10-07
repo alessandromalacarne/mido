@@ -107,6 +107,19 @@ fn changed_files_merges_and_dedupes_every_source() {
 }
 
 #[test]
+fn all_files_merges_tracked_and_untracked_files() {
+    let runner = FakeRunner::with(&[
+        ("--others", 0, "c.rs\n"),
+        ("ls-files", 0, "b.rs\na.rs\nb.rs\n"),
+    ]);
+
+    assert_eq!(
+        all_files(&runner, Path::new("/repo")),
+        vec!["a.rs", "b.rs", "c.rs"]
+    );
+}
+
+#[test]
 fn pick_base_prefers_the_first_known_remote() {
     let runner = FakeRunner::with(&[("origin/develop", 0, "deadbeef\n"), ("origin/mvp", 128, "")]);
 

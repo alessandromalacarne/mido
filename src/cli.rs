@@ -179,6 +179,28 @@ mod tests {
     }
 
     #[test]
+    fn the_no_diff_flag_is_opt_in() {
+        assert!(!parse_from(&[]).no_diff);
+        assert!(parse_from(&["--no-diff"]).no_diff);
+    }
+
+    #[test]
+    fn a_base_revision_is_rejected_with_no_diff() {
+        let rejected = try_parse_from(&["--no-diff", "--base", "origin/mvp"]);
+
+        assert!(rejected.is_err(), "there is no diff to compute a base for");
+        assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
+    }
+
+    #[test]
+    fn the_no_diff_flag_and_explicit_paths_compose() {
+        let args = parse_from(&["--no-diff", "--path", "src"]);
+
+        assert!(args.no_diff);
+        assert_eq!(args.path, vec![PathBuf::from("src")]);
+    }
+
+    #[test]
     fn flags_argv() {
         let args = parse_from(&[
             "--repo",
