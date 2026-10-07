@@ -1,10 +1,11 @@
 //! The markdown report the next step reads.
 
 use super::{verdict, GateResult};
-use crate::targets::Target;
+use crate::targets::{Scope, Target};
 
 pub struct ReportContext<'a> {
     pub target: &'a Target,
+    pub scope: Scope,
     pub base: &'a str,
     pub revision: &'a str,
     pub dirty: &'a str,
@@ -32,21 +33,35 @@ fn report_header(context: &ReportContext<'_>, verdict_line: &str) -> Vec<String>
         format!("VERDICT: {verdict_line}"),
         format!("revision: `{}`", context.revision),
         format!("dirty state hash: `{}`", context.dirty),
-        if context.base.is_empty() {
-            "scope: `explicit paths`".to_string()
-        } else {
-            format!("base: `{}`", context.base)
-        },
+        scope_line(context),
         format!("target: `{}`", context.target.label()),
     ];
-    lines.push(format!(
-        "changed files: {} ({} {})",
+    lines.push(files_line(context));
+    lines.push(String::new());
+    lines
+}
+
+fn scope_line(context: &ReportContext<'_>) -> String {
+    match context.scope {
+        Scope::Paths => "scope: `explicit paths`".to_string(),
+        Scope::Whole => "scope: `whole target (no diff)`".to_string(),
+        Scope::Diff => format!("base: `{}`", context.base),
+    }
+}
+
+/// The files line says what the set was: the diff's changed files, or the
+/// whole-target run's measured ones.
+fn files_line(context: &ReportContext<'_>) -> String {
+    let label = match context.scope {
+        Scope::Whole => "measured files",
+        Scope::Diff | Scope::Paths => "changed files",
+    };
+    format!(
+        "{label}: {} ({} {})",
         context.changed.len(),
         context.source_count,
         context.source_label
-    ));
-    lines.push(String::new());
-    lines
+    )
 }
 
 fn summary_table(results: &[GateResult]) -> Vec<String> {

@@ -1,5 +1,6 @@
 use super::*;
 use crate::report::{GateResult, PASS};
+use crate::targets::Scope;
 use crate::test_support::sample_results;
 
 #[test]
@@ -8,6 +9,7 @@ fn the_report_spells_out_the_fix_for_a_failing_gate() {
         &sample_results(),
         &ReportContext {
             target: &Target::workspace_target("Cargo.toml"),
+            scope: Scope::Diff,
             base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",
@@ -34,6 +36,7 @@ fn a_report_without_a_base_names_the_explicit_paths() {
         )],
         &ReportContext {
             target: &Target::workspace_target("Cargo.toml"),
+            scope: Scope::Paths,
             base: "",
             revision: "fa5bac38",
             dirty: "abc123",

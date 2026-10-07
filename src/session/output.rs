@@ -68,6 +68,7 @@ pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult
         results,
         &ReportContext {
             target,
+            scope: session.scope,
             base: &session.base,
             revision: &session.revision,
             dirty: &session.dirty,
@@ -146,6 +147,7 @@ pub(super) fn target_banner(
     render_banner(
         target,
         &BannerContext {
+            scope: session.scope,
             base: &session.base,
             revision: &session.revision,
             dirty: &session.dirty,

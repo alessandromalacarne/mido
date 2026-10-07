@@ -66,11 +66,14 @@ impl Target {
     }
 }
 
-/// Where the paths a run measures came from: the diff, or the `--path` given.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where the paths a run measures came from: the diff, the `--path` given, or
+/// the whole target (no diff read).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Scope {
+    #[default]
     Diff,
     Paths,
+    Whole,
 }
 
 /// `[targets.<name>]` sections: the repo's own way to name a case. The module

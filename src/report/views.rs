@@ -4,10 +4,11 @@ use super::panel::{field, panel, short, status_glyph};
 use super::{blocked_verdict, GateResult, INCOMPLETE, MAX_BANNER_FILES};
 use crate::gate::GATES;
 use crate::style::Style;
-use crate::targets::Target;
+use crate::targets::{Scope, Target};
 
 #[derive(Debug, Clone, Default)]
 pub struct BannerContext<'a> {
+    pub scope: Scope,
     pub base: &'a str,
     pub revision: &'a str,
     pub dirty: &'a str,
@@ -40,7 +41,7 @@ fn banner_rows(target: &Target, context: &BannerContext<'_>) -> Vec<String> {
         field("revision", short(or_unknown(context.revision))),
         field("dirty", short(or_unknown(context.dirty))),
         field(
-            "changed",
+            files_label(context.scope),
             &format!(
                 "{} files ({} {})",
                 context.changed.len(),
@@ -49,6 +50,15 @@ fn banner_rows(target: &Target, context: &BannerContext<'_>) -> Vec<String> {
             ),
         ),
     ]
+}
+
+/// The count row says what the files were: the diff's changed set, or the
+/// whole-target run's measured set.
+fn files_label(scope: Scope) -> &'static str {
+    match scope {
+        Scope::Whole => "measured",
+        Scope::Diff | Scope::Paths => "changed",
+    }
 }
 
 fn selected_suffix(selected_how: &str) -> String {
@@ -60,10 +70,10 @@ fn selected_suffix(selected_how: &str) -> String {
 }
 
 fn scope_row(context: &BannerContext<'_>) -> String {
-    if context.base.is_empty() {
-        field("scope", "explicit paths")
-    } else {
-        field("base", context.base)
+    match context.scope {
+        Scope::Paths => field("scope", "explicit paths"),
+        Scope::Whole => field("scope", "whole target (no diff)"),
+        Scope::Diff => field("base", context.base),
     }
 }
 

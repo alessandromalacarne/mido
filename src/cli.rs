@@ -41,6 +41,10 @@ pub struct Args {
     #[arg(long = "path", value_name = "PATH", conflicts_with = "base")]
     pub path: Vec<PathBuf>,
 
+    /// measure the whole target instead of the diff; add --path to name specific files
+    #[arg(long = "no-diff", conflicts_with = "base")]
+    pub no_diff: bool,
+
     /// run only this gate (repeatable)
     #[arg(long = "gate")]
     pub gates: Vec<Gate>,

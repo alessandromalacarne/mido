@@ -104,6 +104,7 @@ fn banner_reports_the_revision_it_measured() {
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
+            scope: Scope::Diff,
             base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",
@@ -126,6 +127,7 @@ fn the_banner_is_a_panel_of_labelled_fields() {
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
+            scope: Scope::Diff,
             base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",

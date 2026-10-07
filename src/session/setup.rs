@@ -44,8 +44,9 @@ pub fn build_session(
     })
 }
 
-/// The files this run measures: the diff against a base, or the `--path` list —
-/// a path list is the whole scope, so no base is picked and no diff is read.
+/// The files this run measures: the diff against a base, the `--path` list — a
+/// path list is the whole scope, so no base is picked and no diff is read — or,
+/// with `--no-diff`, every file git sees.
 fn resolve_scope(
     args: &Args,
     repo: &Path,
@@ -56,6 +57,11 @@ fn resolve_scope(
     if !args.path.is_empty() {
         let changed = explicit_paths(repo, config, &args.path, lang)?;
         return Ok((Scope::Paths, String::new(), changed));
+    }
+
+    if args.no_diff {
+        let changed = process::all_files(runner, repo);
+        return Ok((Scope::Whole, String::new(), changed));
     }
 
     let base = args
@@ -110,6 +116,10 @@ pub fn select_targets(
         return Ok(Some(all_targets(targets)));
     }
 
+    if session.scope == Scope::Whole {
+        return Ok(Some(vec![workspace_roll_up(targets)?]));
+    }
+
     match pick_auto_target(targets, &session.changed)? {
         Some(inferred) => Ok(Some(vec![inferred])),
         None => {
@@ -126,6 +136,19 @@ fn all_targets(targets: &BTreeMap<String, Target>) -> Vec<Target> {
         .filter(|target| !target.path.is_empty() || target.workspace_member)
         .cloned()
         .collect()
+}
+
+/// The auto target of a whole-target run: with no diff to infer from, the
+/// workspace roll-up is the repo's own target.
+fn workspace_roll_up(targets: &BTreeMap<String, Target>) -> Result<Target, GuardrailsError> {
+    targets
+        .values()
+        .find(|target| target.path.is_empty())
+        .cloned()
+        .ok_or_else(|| {
+            GuardrailsError::setup("a whole-target run has no workspace target to fall back on")
+                .hint("name a target explicitly, or run with --all")
+        })
 }
 
 /// The target named on the command line, if one was named.
@@ -148,6 +171,21 @@ fn report_nothing_changed(out: &mut dyn Write, session: &Session, style: Style) 
             out,
             "{}",
             style.dim("Pass a file, a folder with files in it, or a target name (--list-targets).")
+        );
+        return;
+    }
+
+    if session.scope == Scope::Whole {
+        let _ = writeln!(
+            out,
+            "nothing to measure: git lists no file in this repository — no tracked file, no untracked one.\n"
+        );
+        let _ = writeln!(
+            out,
+            "{}",
+            style.dim(
+                "The whole-target run measures the files git sees; --path names files directly."
+            )
         );
         return;
     }
