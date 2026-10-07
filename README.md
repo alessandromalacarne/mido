@@ -362,7 +362,7 @@ changed_file_min = 80   # percent line coverage for changed files with new logic
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
-command       = ["cargo", "mutants", "--iterate", "-j2"]
+command       = ["cargo", "mutants", "-j2"]
 scope         = "changed"      # "changed" | "all" | a literal path
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
@@ -386,15 +386,27 @@ Notes:
   Root commands are inherited by workspace members only — a standalone crate
   (one the root manifest excludes) does not inherit them, so `--all-features`
   written for the workspace root does not break a wasm crate.
+- The mutation gate drives **every test command the target declares**: a native
+  logic suite and a browser suite each get their turn at every mutant, with the
+  arguments that command names. Passes after the first run with `--iterate`, so
+  the mutants an earlier pass caught come back as skipped — the evidence names
+  each pass and what it caught.
+- The mutation gate **owns cargo-mutants' output directory**: every run gets its
+  own `--output` under the run scratch, so a verdict can only ever be decided by
+  the mutants that run tested — state from an earlier run (`mutants.out`) is
+  never read. A `--output` on the configured command is a conflict, not an
+  override: the gate reports INCOMPLETE. The counts come from the run's
+  `outcomes.json`; mutants that produced no verdict (timed out, or otherwise
+  unclassified) are INCOMPLETE, never silently dropped from the kill rate.
 - Unknown keys, wrong types and malformed commands are config errors on purpose,
   so a typo cannot silently disable a gate or move a threshold.
 - For mutation speed, the recommended setup (shipped by this repo) is a
-  `[profile.mutants]` inheriting `test` with `debug = "none"` in `Cargo.toml`,
-  a `.cargo/mutants.toml` with `test_tool = "nextest"` and
-  `profile = "mutants"`, and `--iterate -j2` on the command: caught mutants
-  from the previous run are skipped, the rest run two at a time. `--iterate`
-  trusts earlier caught mutants — the gate counts them as killed and says so
-  in the evidence line.
+  `[profile.mutants]` inheriting `test` with `debug = "none"` in `Cargo.toml`
+  and a `.cargo/mutants.toml` with `test_tool = "nextest"` and
+  `profile = "mutants"`, with `-j2` on the command: the mutants run two at a
+  time. Every timed run is a fresh sweep of the changed lines — the gate never
+  reuses a previous run's kills. When a sweep is slow, cargo-mutants'
+  performance guide applies directly: <https://mutants.rs/performance.html>.
 
 ## Reports
 

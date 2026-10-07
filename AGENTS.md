@@ -11,7 +11,7 @@ is the real config, and the runner is `src/main.rs`.
 - `cargo fmt` and `cargo clippy --all-targets --all-features -- -D warnings` — what the syntax gate checks.
 - `cargo run -- --list-targets` / `cargo run -- --gate size` — run the ladder against this repo.
 - `nix develop` — the dev shell with every gate tool (`tokei`, `rust-code-analysis`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`). When `cargo` is not on `PATH`, gate commands are wrapped in `nix develop -c …` automatically.
-- Mutation runs as `cargo mutants --iterate -j2` with `.cargo/mutants.toml` (nextest, `profile = "mutants"`) and `[profile.mutants]` in `Cargo.toml`: previously caught mutants are skipped, the rest run two at a time. The gate counts skipped mutants as killed and says so in the evidence.
+- Mutation runs as `cargo mutants -j2` with `.cargo/mutants.toml` (nextest, `profile = "mutants"`) and `[profile.mutants]` in `Cargo.toml`. The gate gives every run its own `--output` directory under the run scratch, so a verdict can only ever be decided by the mutants that run tested — a previous run's `mutants.out` (or an `--iterate` on the configured command) is never read. It drives every test command the target declares, one pass each, later passes with `--iterate`: the in-run union means skipped counts as killed, and the evidence says so. Counts come from the run's `outcomes.json`; a mutant with no verdict (timed out) is INCOMPLETE.
 
 ## Architecture
 
