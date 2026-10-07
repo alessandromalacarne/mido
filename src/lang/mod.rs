@@ -48,6 +48,22 @@ pub struct MutationSummary {
     pub skipped: i64,
 }
 
+/// What one mutation run reported: the counts its report files carry, the
+/// mutants it left alive, and the exclusion list an `--iterate` pass read at
+/// its start.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MutationReport {
+    pub total: i64,
+    pub caught: i64,
+    pub missed: i64,
+    pub unviable: i64,
+    pub timeout: i64,
+    pub skipped: i64,
+    pub survivors: Vec<String>,
+    pub timed_out: Vec<String>,
+    pub baseline_failure: Option<String>,
+}
+
 /// How a mutation run is scoped.
 pub struct MutationScope<'a> {
     pub configured: &'a str,
@@ -228,6 +244,14 @@ impl Lang {
     pub fn mutation_summary(self, output: &str) -> Option<MutationSummary> {
         match self {
             Lang::Rust => rust::mutation::mutation_summary(output),
+        }
+    }
+
+    /// The report a mutation run wrote into its output directory; `None` when
+    /// it wrote none, or died before finishing.
+    pub fn mutation_report(self, output_dir: &Path) -> Option<MutationReport> {
+        match self {
+            Lang::Rust => rust::mutation::report::read(output_dir),
         }
     }
 

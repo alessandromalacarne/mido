@@ -1,5 +1,7 @@
 //! cargo-mutants: its summary line, and the arguments that scope it.
 
+pub mod report;
+
 use crate::error::GuardrailsError;
 use crate::lang::rust::is_source;
 use crate::lang::{MutationScope, MutationSummary};
