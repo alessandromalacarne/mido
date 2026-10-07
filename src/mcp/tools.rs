@@ -64,6 +64,12 @@ fn selection_properties() -> Value {
             "description": "measure these files, folders or target names instead of the diff \
                             (conflicts with base)",
         },
+        "no_diff": {
+            "type": "boolean",
+            "default": false,
+            "description": "measure the whole target instead of the diff; no diff is read \
+                            (combine with paths to name specific files; conflicts with base)",
+        },
     })
 }
 
@@ -162,12 +168,13 @@ fn list_targets(arguments: &Value) -> Result<Vec<String>, String> {
 }
 
 /// Every argument `run_ladder` accepts; anything else is a typo.
-const RUN_LADDER_ARGUMENTS: [&str; 11] = [
+const RUN_LADDER_ARGUMENTS: [&str; 12] = [
     "target",
     "repo",
     "lang",
     "base",
     "paths",
+    "no_diff",
     "gates",
     "all",
     "apply_workspace_aid",
@@ -197,6 +204,7 @@ fn run_ladder(arguments: &Value) -> Result<Vec<String>, String> {
         &mut argv,
         arguments,
         &[
+            ("--no-diff", "no_diff", false),
             ("--all", "all", false),
             ("--apply-workspace-aid", "apply_workspace_aid", false),
             ("--json", "json", true),
