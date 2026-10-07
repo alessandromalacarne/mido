@@ -198,9 +198,9 @@ carries all of them.
 ## Usage
 
 ```
-mido [TARGET] [--lang LANG] [--repo PATH] [--base REF] [--path PATH]… [--gate GATE]…
-     [--all] [--list-targets] [--apply-workspace-aid] [--baseline-lcov PATH]
-     [--report PATH] [--json]
+mido [TARGET] [--lang LANG] [--repo PATH] [--base REF] [--no-diff] [--path PATH]…
+     [--gate GATE]… [--all] [--list-targets] [--apply-workspace-aid]
+     [--baseline-lcov PATH] [--report PATH] [--json]
 mido mcp
 ```
 
@@ -211,6 +211,8 @@ mido --lang rust              # force the language module; default: inferred fro
 mido --all                    # every detected target, in turn
 mido --list-targets           # show what can be measured, then exit
 mido --base origin/main       # measure against another base
+mido --no-diff                # measure the whole target; no diff is read
+mido --no-diff --path lib/src/lib.rs    # … or just this file
 mido --path src/gates        # measure these paths instead; no diff is read
 mido --path lib/src/lib.rs --path cli   # repeat for a file and a target name
 mido --gate coverage --gate mutation   # run a subset of the ladder
@@ -250,11 +252,11 @@ Two tools, each the CLI surface for one job:
   or a setup error. `tests` and `mutation` run for as long as the CLI takes.
 
 Every argument maps to a flag of the same name (`target`, `repo`, `base`,
-`paths`, `gates`, `all`, `apply_workspace_aid`, `baseline_lcov`, `report`,
-`json`), so the CLI's rules — `--path` conflicts with `--base`, unknown targets
-are errors — apply unchanged; a typo in an argument name is rejected, not
-dropped. stdout carries protocol messages only; anything the server itself has
-to say goes to stderr.
+`paths`, `no_diff`, `gates`, `all`, `apply_workspace_aid`, `baseline_lcov`,
+`report`, `json`), so the CLI's rules — `--path` conflicts with `--base`,
+unknown targets are errors — apply unchanged; a typo in an argument name is
+rejected, not dropped. stdout carries protocol messages only; anything the
+server itself has to say goes to stderr.
 
 ## Measuring paths instead of a diff
 
@@ -280,6 +282,29 @@ mutation gate mutates the named files instead of a diff patch.
 `--path` and `--base` are mutually exclusive — there is no base to diff a path
 list against — and a path that does not exist, or lives outside the repo, is a
 setup error (exit 2).
+
+## Measuring the whole target (`--no-diff`)
+
+`--no-diff` runs the ladder independent of the diff: no base is picked and no
+`merge-base`/`git diff` is read. The scope is every file git can see — tracked
+files plus untracked ones that are not ignored. Use it when there is no diff to
+scope by: a fully committed tree, a shallow checkout, or an audit of code
+nobody touched.
+
+Everything downstream treats those files as the scope: size, analysis, syntax
+and coverage measure every source file of the target, the tests gate runs the
+target's commands, and the mutation gate mutates the whole package instead of a
+diff patch. The banner and the report print `scope  whole target (no diff)` and
+count `measured` files where a diff-based run prints its `base` and `changed`
+files.
+
+- With no target named, `auto` falls back to the **workspace** roll-up — there
+  is no diff to infer from. `mido --no-diff lib` measures that member;
+  `mido --no-diff --all` measures every target in turn.
+- `--no-diff --path <file|folder|target>` narrows the run to exactly those
+  paths, composed the same way `--path` works on its own.
+- `--no-diff` and `--base` are mutually exclusive. A repository git lists no
+  file for measures nothing and exits 2.
 
 ## Targets
 
