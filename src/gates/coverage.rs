@@ -1,8 +1,8 @@
-//! Gate 5 — coverage of the changed code.
+//! Gate 5 — line coverage of the whole target.
 
 use crate::gate::Gate;
 use crate::gates::GateRun;
-use crate::metrics::{lcov_files, percent, relative_to, touches, LcovStat};
+use crate::metrics::{lcov_files, percent, LcovStat};
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
 use crate::targets::Target;
@@ -45,42 +45,19 @@ fn output_path(argv: &[String]) -> Option<PathBuf> {
     None
 }
 
-pub fn judge_changed_coverage(
-    files: &BTreeMap<String, LcovStat>,
-    changed: &[String],
-    target: &Target,
-    minimum: f64,
-) -> (Vec<String>, Vec<String>) {
-    let mut problems = Vec::new();
-    let mut details = Vec::new();
-    let mut seen_changed = false;
-
-    for (path, stats) in files {
-        if !touches(path, changed) {
-            continue;
-        }
-        seen_changed = true;
-        let value = percent(stats.lines_hit, stats.lines_found);
-        let verdict = if value >= minimum { "ok" } else { "FAIL" };
-        let shown = relative_to(path, target);
-        details.push(format!(
-            "changed file {shown}: {}/{} = {value:.1}% ({verdict})",
-            stats.lines_hit, stats.lines_found
-        ));
-        if value < minimum {
-            problems.push(format!(
-                "changed file {shown}: {}/{} = {value:.1}% (min {minimum})",
-                stats.lines_hit, stats.lines_found
-            ));
-        }
-    }
-
-    if !seen_changed {
-        details.push(
-            "no changed file appears in the report — coverage of this change is unverified, not 100%"
-                .to_string(),
-        );
-    }
+/// The total line coverage against its floor.
+pub fn judge_total_coverage(totals: (i64, i64), minimum: f64) -> (Vec<String>, Vec<String>) {
+    let value = percent(totals.0, totals.1);
+    let verdict = if value >= minimum { "ok" } else { "FAIL" };
+    let details = vec![format!(
+        "total: {}/{} = {value:.1}% (min {minimum}, {verdict})",
+        totals.0, totals.1
+    )];
+    let problems = if value < minimum {
+        vec![format!("total coverage {value:.1}% (min {minimum})")]
+    } else {
+        Vec::new()
+    };
     (problems, details)
 }
 
@@ -122,12 +99,11 @@ pub fn gate_coverage(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
         target,
         config,
         lang,
-        changed,
         scratch,
         baseline_lcov,
         ..
     } = *run;
-    let minimum = config.float("coverage", "changed_file_min", 80.0, Some(&target.name));
+    let minimum = config.float("coverage", "coverage_min", 80.0, Some(&target.name));
     let drop_max = config.float("coverage", "total_drop_max", 0.0, Some(&target.name));
     let argv = config
         .argv("coverage", "command", target)
@@ -136,7 +112,7 @@ pub fn gate_coverage(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
     let (argv, report_path) = coverage_report_path(&argv, repo, target, scratch);
     let command = argv.join(" ");
     let contract = format!(
-        "{} [coverage] changed_file_min={minimum} via `{command}`",
+        "{} [coverage] coverage_min={minimum} via `{command}`",
         config.source()
     );
 
@@ -145,15 +121,7 @@ pub fn gate_coverage(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
         return missing_report(&result, &command, &report_path, &contract);
     }
 
-    judge_coverage(
-        &report_path,
-        changed,
-        target,
-        baseline_lcov,
-        minimum,
-        drop_max,
-        contract,
-    )
+    judge_coverage(&report_path, baseline_lcov, minimum, drop_max, contract)
 }
 
 /// No report means no evidence: INCOMPLETE, with the tool's own tail as the reason.
@@ -184,8 +152,6 @@ fn missing_report(
 
 fn judge_coverage(
     report_path: &Path,
-    changed: &[String],
-    target: &Target,
     baseline_lcov: Option<&Path>,
     minimum: f64,
     drop_max: f64,
@@ -193,20 +159,25 @@ fn judge_coverage(
 ) -> GateResult {
     let files = lcov_files(report_path);
     let totals = totals(&files);
-    let (mut problems, mut details) = judge_changed_coverage(&files, changed, target, minimum);
+    if totals.1 == 0 {
+        return GateResult::new(
+            "coverage",
+            INCOMPLETE,
+            "the report holds no measurable line",
+            [
+                format!("report: {}", report_path.display()),
+                "coverage of this target is unverified, not 100%".to_string(),
+            ],
+        )
+        .contract(contract)
+        .fixes(Gate::Coverage.fix_hints().iter().copied());
+    }
+
+    let (mut problems, mut details) = judge_total_coverage(totals, minimum);
     let (delta_problems, delta_details) = judge_coverage_delta(totals, baseline_lcov, drop_max);
     problems.extend(delta_problems);
 
     details.insert(0, format!("report: {}", report_path.display()));
-    details.insert(
-        1,
-        format!(
-            "total: {}/{} = {:.1}%",
-            totals.0,
-            totals.1,
-            percent(totals.0, totals.1)
-        ),
-    );
     details.extend(delta_details);
 
     coverage_verdict(totals, problems, details, contract)

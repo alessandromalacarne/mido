@@ -140,13 +140,13 @@ pub fn gate_size(
     let GateRun {
         repo,
         target,
-        changed,
+        files,
         config,
         lang,
         ..
     } = *run;
     let limits = size_limits(config, target);
-    let source_files = existing_source_files(lang, repo, target, changed);
+    let source_files = existing_source_files(lang, repo, target, files);
     let mut measurement_errors: Vec<String> = tool_errors.to_vec();
 
     let lines = measured_lines(runner, run, &source_files, &mut measurement_errors);
@@ -209,15 +209,15 @@ fn judgement(
     (problems, details)
 }
 
-/// The changed source files that still exist — a deleted file has nothing to
+/// The measured source files that still exist — a deleted file has nothing to
 /// measure, and tokei fails on a path that is not there.
 fn existing_source_files(
     lang: Lang,
     repo: &Path,
     target: &Target,
-    changed: &[String],
+    files: &[String],
 ) -> Vec<String> {
-    changed
+    files
         .iter()
         .filter(|path| lang.is_source(path) && target.dir(repo).join(path).exists())
         .cloned()
@@ -269,7 +269,7 @@ fn worst_summary(units: &[Unit], lang: Lang) -> String {
             "worst function {} sloc / cc {} ({})",
             worst.sloc, worst.cyclomatic, worst.name
         ),
-        None => format!("no {} changes", lang.source_label()),
+        None => format!("no {} source files", lang.source_label()),
     }
 }
 
