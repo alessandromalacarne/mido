@@ -1,12 +1,9 @@
-//! cargo targets: workspace members, excluded crates, and path resolution.
+//! cargo targets: workspace members, excluded crates, and package resolution.
 
 use crate::config::{value, Config};
 use crate::error::GuardrailsError;
 use crate::lang::rust::MANIFEST;
-use crate::targets::{
-    canonical_candidate, declared_targets, directory_scope, manifest_for, repo_relative, top_level,
-    Target,
-};
+use crate::targets::{declared_targets, Target};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -52,6 +49,17 @@ pub fn crate_dirs(repo: &Path) -> Vec<String> {
     crates
 }
 
+/// The package name a crate's manifest declares, as cargo's `-p` spells it.
+pub fn package_name(repo: &Path, dir: &str) -> Option<String> {
+    let text = std::fs::read_to_string(repo.join(dir).join(MANIFEST)).ok()?;
+    let data = text.parse::<toml::Table>().ok()?;
+    data.get("package")
+        .and_then(value::as_table)
+        .and_then(|package| package.get("name"))
+        .and_then(value::as_str)
+        .map(str::to_string)
+}
+
 pub fn detect_targets(repo: &Path, config: &Config) -> BTreeMap<String, Target> {
     let (members, excluded) = workspace_layout(repo);
     let mut targets = BTreeMap::new();
@@ -60,8 +68,8 @@ pub fn detect_targets(repo: &Path, config: &Config) -> BTreeMap<String, Target> 
         "workspace".to_string(),
         Target {
             name: "workspace".to_string(),
+            package: None,
             path: String::new(),
-            scope: members.iter().map(|member| format!("{member}/")).collect(),
             manifest: if repo.join(MANIFEST).exists() {
                 Some(MANIFEST.to_string())
             } else {
@@ -73,13 +81,15 @@ pub fn detect_targets(repo: &Path, config: &Config) -> BTreeMap<String, Target> 
 
     for crate_name in crate_dirs(repo) {
         if members.contains(&crate_name) {
-            targets
-                .entry(crate_name.clone())
-                .or_insert_with(|| Target::crate_target(&crate_name, true, MANIFEST));
+            targets.entry(crate_name.clone()).or_insert_with(|| {
+                Target::crate_target(&crate_name, true, MANIFEST)
+                    .with_package(package_name(repo, &crate_name))
+            });
         } else if excluded.contains(&crate_name) {
             targets.insert(
                 crate_name.clone(),
-                Target::crate_target(&crate_name, false, MANIFEST),
+                Target::crate_target(&crate_name, false, MANIFEST)
+                    .with_package(package_name(repo, &crate_name)),
             );
         }
     }
@@ -88,61 +98,41 @@ pub fn detect_targets(repo: &Path, config: &Config) -> BTreeMap<String, Target> 
     targets
 }
 
-pub fn resolve_target(repo: &Path, config: &Config, spec: &str) -> Result<Target, GuardrailsError> {
+/// Resolve `-p` the way cargo resolves `--package`: by package name, with the
+/// listed target names accepted for declared targets. A name no target answers
+/// to is a setup error — never a silent whole-workspace run.
+pub fn resolve_package(
+    repo: &Path,
+    config: &Config,
+    spec: &str,
+) -> Result<Target, GuardrailsError> {
     let targets = detect_targets(repo, config);
     if let Some(target) = targets.get(spec) {
         return Ok(target.clone());
     }
-
-    let candidate = canonical_candidate(repo, Path::new(spec));
-    if !candidate.exists() {
-        return Err(unknown_target_error(repo, spec, &targets));
-    }
-    if !candidate.join(MANIFEST).exists() {
-        return Err(no_manifest_error(spec, &candidate));
-    }
-
-    let relative = repo_relative(repo, &candidate);
-    let name = candidate
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| relative.clone());
-    if let Some(target) = targets.get(&name) {
+    if let Some(target) = targets
+        .values()
+        .find(|target| target.package.as_deref() == Some(spec))
+    {
         return Ok(target.clone());
     }
 
-    let (members, _) = workspace_layout(repo);
-    let is_root = relative.is_empty();
-    let path = if is_root { String::new() } else { relative };
-    Ok(Target {
-        workspace_member: is_root || members.contains(&top_level(&path)),
-        scope: vec![directory_scope(&path)],
-        manifest: Some(manifest_for(&path, MANIFEST)),
-        name,
-        path,
-    })
+    Err(unknown_package_error(spec, &targets))
 }
 
-fn unknown_target_error(
-    repo: &Path,
-    spec: &str,
-    targets: &BTreeMap<String, Target>,
-) -> GuardrailsError {
-    GuardrailsError::setup(format!("unknown target `{spec}`"))
-        .detail(format!("no such name or path under {}", repo.display()))
-        .detail(format!(
-            "known targets: {}",
-            targets.keys().cloned().collect::<Vec<_>>().join(", ")
-        ))
-        .hint(format!(
-            "pass one of the known target names, a directory holding a {MANIFEST}, or --list-targets"
-        ))
-}
+fn unknown_package_error(spec: &str, targets: &BTreeMap<String, Target>) -> GuardrailsError {
+    let mut known: Vec<String> = targets
+        .values()
+        .map(|target| match &target.package {
+            Some(package) if *package != target.name => format!("{} ({package})", target.name),
+            _ => target.name.clone(),
+        })
+        .collect();
+    known.sort();
 
-fn no_manifest_error(spec: &str, candidate: &Path) -> GuardrailsError {
-    GuardrailsError::setup(format!("`{spec}` holds no {MANIFEST}"))
-        .detail(format!("looked for {}", candidate.join(MANIFEST).display()))
-        .hint("the ladder measures a cargo target; point it at a crate directory")
+    GuardrailsError::setup(format!("package `{spec}` not found in this workspace"))
+        .detail(format!("known names: {}", known.join(", ")))
+        .hint("pass a package name, or run without -p to measure the whole workspace")
 }
 
 #[cfg(test)]
@@ -168,7 +158,7 @@ mod tests {
         let workspace = detected.get("workspace").expect("workspace target");
 
         assert_eq!(workspace.path, "");
-        assert_eq!(workspace.scope, vec!["cli/", "api/", "lib/"]);
+        assert_eq!(workspace.package, None);
         assert!(workspace.workspace_member);
     }
 
@@ -178,12 +168,49 @@ mod tests {
 
         let detected = targets(&repo);
 
-        assert_eq!(
-            detected.get("frontend").expect("frontend").scope,
-            vec!["frontend/"]
-        );
+        assert_eq!(detected.get("frontend").expect("frontend").path, "frontend");
         assert!(!detected.get("frontend").expect("frontend").workspace_member);
+        assert_eq!(
+            detected
+                .get("frontend")
+                .expect("frontend")
+                .package
+                .as_deref(),
+            Some("frontend")
+        );
         assert!(detected.contains_key("desktop"));
+    }
+
+    #[test]
+    fn member_targets_carry_their_package_names() {
+        let repo = repo(None);
+
+        let detected = targets(&repo);
+
+        assert_eq!(
+            detected.get("cli").expect("cli").package.as_deref(),
+            Some("cli")
+        );
+        assert_eq!(
+            detected.get("api").expect("api").package.as_deref(),
+            Some("api")
+        );
+    }
+
+    #[test]
+    fn a_package_name_that_differs_from_the_directory_still_resolves() {
+        let repo = repo(None);
+        std::fs::write(
+            repo.root.join("cli/Cargo.toml"),
+            "[package]\nname = \"cli-tool\"\n",
+        )
+        .expect("manifest");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+
+        let target = resolve_package(&repo.root, &config, "cli-tool").expect("resolves");
+
+        assert_eq!(target.name, "cli");
+        assert_eq!(target.path, "cli");
     }
 
     #[test]
@@ -193,29 +220,24 @@ mod tests {
             version = 1
 
             [targets.tui]
-            path = \"cli\"
-            scope = [\"cli/src/tui/\"]
+            path = \"cli/src/tui\"
         ",
         ));
 
-        assert_eq!(
-            targets(&repo).get("tui").expect("tui").scope,
-            vec!["cli/src/tui/"]
-        );
+        assert_eq!(targets(&repo).get("tui").expect("tui").path, "cli/src/tui");
     }
 
     #[test]
-    fn a_target_section_defaults_its_scope_to_its_path() {
+    fn a_target_section_defaults_its_path_to_its_name() {
         let repo = repo(Some(
             "
             version = 1
 
             [targets.api]
-            path = \"api\"
         ",
         ));
 
-        assert_eq!(targets(&repo).get("api").expect("api").scope, vec!["api/"]);
+        assert_eq!(targets(&repo).get("api").expect("api").path, "api");
     }
 
     #[test]
@@ -236,87 +258,34 @@ mod tests {
     }
 
     #[test]
-    fn resolving_the_repo_root_marks_it_a_workspace_member() {
-        let repo = repo(None);
-        let root = std::fs::canonicalize(&repo.root).expect("canonical root");
-        let config = Config::load(&root, &Lang::Rust).expect("config loads");
+    fn package_resolution_accepts_a_declared_name() {
+        let repo = repo(Some(
+            "
+            version = 1
 
-        let target = resolve_target(&root, &config, &root.to_string_lossy())
-            .expect("the repo root resolves");
+            [targets.tui]
+            path = \"cli\"
+        ",
+        ));
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
 
-        assert!(target.workspace_member);
-        assert_eq!(target.path, "");
+        let target = resolve_package(&repo.root, &config, "tui").expect("resolves");
+
+        assert_eq!(target.path, "cli");
     }
 
     #[test]
-    fn target_parameter_resolves_by_name() {
+    fn an_unknown_package_is_a_setup_error_listing_the_known_names() {
         let repo = repo(None);
         let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
 
-        let target = resolve_target(&repo.root, &config, "frontend").expect("resolves");
-
-        assert_eq!(target.name, "frontend");
-        assert_eq!(target.path, "frontend");
-    }
-
-    #[test]
-    fn target_parameter_resolves_by_path() {
-        let repo = repo(None);
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-
-        let target = resolve_target(
-            &repo.root,
-            &config,
-            &repo.root.join("frontend").to_string_lossy(),
-        )
-        .expect("resolves");
-
-        assert_eq!(target.name, "frontend");
-        assert_eq!(target.dir(&repo.root), repo.root.join("frontend"));
-    }
-
-    #[test]
-    fn a_path_outside_the_repo_resolves_to_its_own_target() {
-        let repo = repo(None);
-        let elsewhere = tempfile::tempdir().expect("temp dir");
-        std::fs::write(
-            elsewhere.path().join("Cargo.toml"),
-            "[package]\nname = \"outer\"\n",
-        )
-        .expect("manifest");
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-
-        let target = resolve_target(&repo.root, &config, &elsewhere.path().to_string_lossy())
-            .expect("resolves");
-
-        assert_eq!(target.path, elsewhere.path().to_string_lossy());
-        assert!(!target.workspace_member);
-    }
-
-    #[test]
-    fn unknown_target_is_a_setup_error_listing_the_known_names() {
-        let repo = repo(None);
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-
-        let message = resolve_target(&repo.root, &config, "nope")
-            .expect_err("unknown target")
+        let message = resolve_package(&repo.root, &config, "nope")
+            .expect_err("unknown package")
             .render();
 
-        assert!(message.contains("nope"));
-        assert!(message.contains("frontend"));
-        assert!(message.contains("workspace"));
-    }
-
-    #[test]
-    fn path_without_a_manifest_is_a_setup_error() {
-        let repo = repo(None);
-        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
-
-        let message = resolve_target(&repo.root, &config, "scripts")
-            .expect_err("no manifest")
-            .render();
-
-        assert!(message.contains("Cargo.toml"));
+        assert!(message.contains("package `nope` not found"), "{message}");
+        assert!(message.contains("frontend"), "{message}");
+        assert!(message.contains("workspace"), "{message}");
     }
 
     #[test]
@@ -330,14 +299,14 @@ mod tests {
     }
 
     #[test]
-    fn targets_without_a_workspace_manifest_have_no_scope() {
+    fn targets_without_a_workspace_manifest_have_no_manifest() {
         let repo = repo(Some("version = 1\n"));
         std::fs::remove_file(repo.root.join("Cargo.toml")).expect("no root manifest");
 
         let detected = targets(&repo);
         let workspace = detected.get("workspace").expect("workspace target");
 
-        assert!(workspace.scope.is_empty());
         assert_eq!(workspace.manifest, None);
+        assert_eq!(workspace.package, None);
     }
 }

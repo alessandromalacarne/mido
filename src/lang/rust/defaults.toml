@@ -25,12 +25,11 @@ timeout_secs = 900
 
 [coverage]
 command          = ["cargo", "llvm-cov", "--all-features", "--lcov", "--output-path", "lcov.info"]
-changed_file_min = 80   # percent line coverage for changed files with new logic
+coverage_min     = 80   # percent total line coverage of the measured target
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
 command       = ["cargo", "mutants", "-j2"]  # mido adds --output; later passes get --iterate
-scope         = "changed"      # "changed" | "all" | a literal path
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 

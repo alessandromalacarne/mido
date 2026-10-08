@@ -23,7 +23,7 @@ impl GuardrailsError {
         Self::new(message)
     }
 
-    /// The requested run does not make sense (unknown target, no manifest, no diff).
+    /// The requested run does not make sense (unknown package, no manifest).
     pub fn setup(message: impl Into<String>) -> Self {
         Self::new(message)
     }
@@ -142,13 +142,13 @@ mod tests {
     fn setup_error_renders_message_details_and_hint() {
         let error = GuardrailsError::setup("cannot measure anything here")
             .detail("no Cargo.toml under `scripts`")
-            .hint("pass --target frontend");
+            .hint("pass -p frontend");
 
         let rendered = error.render();
 
         assert!(rendered.contains("error: cannot measure anything here"));
         assert!(rendered.contains("no Cargo.toml under `scripts`"));
-        assert!(rendered.contains("hint: pass --target frontend"));
+        assert!(rendered.contains("hint: pass -p frontend"));
     }
 
     #[test]
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn a_styled_error_paints_the_lead_in_and_steps_the_hint_back() {
-        let error = GuardrailsError::setup("boom").hint("pass --target frontend");
+        let error = GuardrailsError::setup("boom").hint("pass -p frontend");
 
         let rendered = error.render_styled(Style::colored());
 
@@ -185,7 +185,7 @@ mod tests {
             "{rendered:?}"
         );
         assert!(
-            rendered.ends_with("\u{1b}[2m  hint: pass --target frontend\u{1b}[0m"),
+            rendered.ends_with("\u{1b}[2m  hint: pass -p frontend\u{1b}[0m"),
             "{rendered:?}"
         );
     }

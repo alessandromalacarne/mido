@@ -47,7 +47,7 @@ impl Gate {
     pub const fn fix_hints(self) -> &'static [&'static str] {
         match self {
             Gate::Syntax => &[
-                "fix the diagnostics in the changed files",
+                "fix the diagnostics the formatter, linter and type checker report",
                 "formatting alone may be auto-fixed: run the formatter in write mode, then re-run",
             ],
             Gate::Size => &[
@@ -59,7 +59,7 @@ impl Gate {
             Gate::Tests => {
                 &["fix the failing tests; never skip, ignore or loosen an assertion to go green"]
             }
-            Gate::Coverage => &["add behavior tests for the uncovered lines of the changed files"],
+            Gate::Coverage => &["add behavior tests for the lines the report shows uncovered"],
             Gate::Mutation => {
                 &["every survivor needs a real assertion, or a written equivalence justification"]
             }

@@ -1,6 +1,18 @@
 //! The session as the CLI drives it: argv in, exit code and output out.
 
-use crate::test_support::{changed_runner, run_cli as run, FakeRunner, MiniRepo};
+use crate::test_support::{repo_runner, run_cli as run, FakeRunner, MiniRepo};
+
+/// A tests-gate config, so fixture runs are cheap and their output is stable.
+fn tests_config() -> Option<&'static str> {
+    Some(
+        "
+            version = 1
+
+            [tests]
+            command = [\"cargo\", \"test\"]
+        ",
+    )
+}
 
 #[test]
 fn list_targets_prints_the_detected_set() {
@@ -35,16 +47,16 @@ fn a_config_without_a_version_warns_on_stderr() {
 }
 
 #[test]
-fn unknown_target_exits_2_with_a_detailed_error() {
+fn an_unknown_package_exits_2_with_a_detailed_error() {
     let repo = MiniRepo::build(None);
     let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "nope"],
+        &["--repo", &repo.root.to_string_lossy(), "-p", "nope"],
         &FakeRunner::default(),
     );
 
     assert_eq!(code, 2);
-    assert!(err.contains("error:"));
-    assert!(err.contains("frontend"));
+    assert!(err.contains("package `nope` not found"), "{err}");
+    assert!(err.contains("frontend"), "{err}");
 }
 
 #[test]
@@ -58,7 +70,7 @@ fn invalid_config_exits_2_with_a_detailed_error() {
         ",
     ));
     let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "frontend"],
+        &["--repo", &repo.root.to_string_lossy(), "-p", "frontend"],
         &FakeRunner::default(),
     );
 
@@ -69,159 +81,12 @@ fn invalid_config_exits_2_with_a_detailed_error() {
 }
 
 #[test]
-fn no_changed_files_exits_2_instead_of_claiming_a_pass() {
-    let repo = MiniRepo::build(None);
-    let _ = repo.git();
-    let (code, out, _) = run(
-        &["--repo", &repo.root.to_string_lossy(), "workspace"],
-        &FakeRunner::default(),
-    );
-
-    assert_eq!(code, 2);
-    assert!(out.to_lowercase().contains("nothing"));
-}
-
-#[test]
-fn a_target_owning_none_of_the_diff_leaves_nothing_ship_ready() {
-    let repo = MiniRepo::build(None);
-    let runner = changed_runner((0, "test result: ok. 1 passed; 0 failed\n"));
-
-    let (code, out, _) = run(
-        &["--repo", &repo.root.to_string_lossy(), "frontend"],
-        &runner,
-    );
-
-    assert_eq!(code, 2);
-    assert!(out.contains("no gate ran"), "{out}");
-    assert!(out.contains("nothing here is ship-ready"), "{out}");
-}
-
-#[test]
-fn a_no_diff_run_measures_the_whole_target() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let runner = FakeRunner::with(&[
-        ("--others", 0, ""),
-        ("ls-files", 0, "lib/src/foo.rs\nlib/src/bar.rs\n"),
-        ("hash-object", 0, "dirtyhash\n"),
-        ("cargo test", 0, "test result: ok. 3 passed; 0 failed\n"),
-    ]);
-
-    let (code, out, _) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "lib",
-            "--no-diff",
-            "--gate",
-            "tests",
-        ],
-        &runner,
-    );
-
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("whole target (no diff)"), "{out}");
-    assert!(out.contains("src/foo.rs"), "{out}");
-    assert!(out.contains("src/bar.rs"), "{out}");
-    assert!(
-        runner.called_with("ls-files"),
-        "the file set comes from git"
-    );
-    assert!(!runner.called_with("merge-base"), "no diff was read");
-}
-
-#[test]
-fn a_no_diff_run_can_measure_one_file() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    std::fs::create_dir_all(repo.root.join("lib/src")).expect("member src dir");
-    std::fs::write(
-        repo.root.join("lib/src/bar.rs"),
-        "pub fn bar() -> i64 {\n    1\n}\n",
-    )
-    .expect("named file");
-    let runner = FakeRunner::with(&[
-        ("hash-object", 0, "dirtyhash\n"),
-        ("cargo test", 0, "test result: ok. 1 passed; 0 failed\n"),
-    ]);
-
-    let (code, out, _) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "--no-diff",
-            "--path",
-            "lib/src/bar.rs",
-            "--gate",
-            "tests",
-        ],
-        &runner,
-    );
-
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("explicit paths"), "{out}");
-    assert!(out.contains("src/bar.rs"), "{out}");
-    assert!(!out.contains("src/foo.rs"), "{out}");
-}
-
-#[test]
-fn a_no_diff_run_defaults_to_the_workspace_roll_up() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let runner = FakeRunner::with(&[
-        ("--others", 0, ""),
-        ("ls-files", 0, "lib/src/foo.rs\n"),
-        ("hash-object", 0, "dirtyhash\n"),
-        ("cargo test", 0, "test result: ok. 1 passed; 0 failed\n"),
-    ]);
-
-    let (code, out, _) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "--no-diff",
-            "--gate",
-            "tests",
-        ],
-        &runner,
-    );
-
-    assert_eq!(code, 0, "{out}");
-    assert!(out.contains("whole target (no diff)"), "{out}");
-    assert!(out.contains("workspace (./)"), "{out}");
-}
-
-#[test]
-fn a_no_diff_run_with_no_visible_file_measures_nothing() {
+fn a_run_with_no_visible_file_measures_nothing() {
     let repo = MiniRepo::build(None);
     let runner = FakeRunner::with(&[("hash-object", 0, "dirtyhash\n")]);
 
     let (code, out, _) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "--no-diff",
-            "--gate",
-            "tests",
-        ],
+        &["--repo", &repo.root.to_string_lossy(), "--gate", "tests"],
         &runner,
     );
 
@@ -231,23 +96,101 @@ fn a_no_diff_run_with_no_visible_file_measures_nothing() {
 }
 
 #[test]
-fn a_passing_run_writes_the_report_and_says_so() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
+fn the_workspace_measures_every_file_it_owns() {
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\nlib/Cargo.toml\nfrontend/src/main.rs\n",
+        (0, "test result: ok. 3 passed; 0 failed\n"),
+    );
 
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let report = repo.root.join("report.md");
-    let runner = changed_runner((0, "test result: ok. 3 passed; 0 failed\n"));
+    let (code, out, _) = run(
+        &["--repo", &repo.root.to_string_lossy(), "--gate", "tests"],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("workspace (./)"), "{out}");
+    assert!(out.contains("measured 2 files (1 rust)"), "{out}");
+    assert!(out.contains("  lib/src/foo.rs"), "{out}");
+    assert!(
+        !out.contains("frontend"),
+        "a standalone crate's files belong to it, not to the workspace: {out}"
+    );
+    assert!(
+        runner.called_with("ls-files"),
+        "the file set comes from git"
+    );
+}
+
+#[test]
+fn a_package_measures_its_whole_directory() {
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\nlib/src/bar.rs\nfrontend/src/main.rs\n",
+        (0, "test result: ok. 3 passed; 0 failed\n"),
+    );
 
     let (code, out, _) = run(
         &[
             "--repo",
             &repo.root.to_string_lossy(),
-            "workspace",
+            "-p",
+            "lib",
+            "--gate",
+            "tests",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("lib (lib/)"), "{out}");
+    assert!(out.contains("measured 2 files (2 rust)"), "{out}");
+    assert!(out.contains("  src/foo.rs"), "{out}");
+    assert!(out.contains("  src/bar.rs"), "{out}");
+    assert!(!out.contains("main.rs"), "{out}");
+}
+
+#[test]
+fn several_packages_are_measured_in_turn() {
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\napi/src/bar.rs\n",
+        (0, "test result: ok. 1 passed; 0 failed\n"),
+    );
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "-p",
+            "lib",
+            "-p",
+            "api",
+            "--gate",
+            "tests",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("lib (lib/)"), "{out}");
+    assert!(out.contains("api (api/)"), "{out}");
+    assert_eq!(out.matches("SHIP-READY").count(), 2, "{out}");
+}
+
+#[test]
+fn a_passing_run_writes_the_report_and_says_so() {
+    let repo = MiniRepo::build(tests_config());
+    let report = repo.root.join("report.md");
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (0, "test result: ok. 3 passed; 0 failed\n"),
+    );
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
             "--gate",
             "tests",
             "--report",
@@ -257,32 +200,31 @@ fn a_passing_run_writes_the_report_and_says_so() {
         &runner,
     );
 
-    assert_eq!(code, 0);
+    assert_eq!(code, 0, "{out}");
     assert!(out.contains("│ SHIP-READY"), "{out}");
     assert!(out.contains("\"verdict\":\"SHIP-READY\""));
     assert!(out.contains("report written to"));
     let markdown = std::fs::read_to_string(&report).expect("report");
     assert!(markdown.contains("VERDICT: SHIP-READY"));
+    assert!(
+        markdown.contains("measured files: 1 (1 rust)"),
+        "{markdown}"
+    );
 }
 
 #[test]
 fn a_failing_gate_exits_1_with_the_failure_report_on_stdout() {
-    let repo = MiniRepo::build(Some(
-        "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\"]
-        ",
-    ));
-    let runner = changed_runner((101, "test result: FAILED. 0 passed; 2 failed\n"));
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (101, "test result: FAILED. 0 passed; 2 failed\n"),
+    );
     let report = repo.root.join("report.md");
 
     let (code, out, err) = run(
         &[
             "--repo",
             &repo.root.to_string_lossy(),
-            "workspace",
             "--gate",
             "tests",
             "--report",
@@ -308,17 +250,14 @@ fn a_gate_that_never_reached_a_verdict_exits_2_instead_of_1() {
         repo.root.join("lib/src/foo.rs"),
         "pub fn foo() -> i64 {\n    1\n}\n",
     )
-    .expect("changed file");
-    let runner = changed_runner((0, ""));
+    .expect("measured file");
+    let runner = FakeRunner::with(&[
+        ("ls-files", 0, "lib/src/foo.rs\n"),
+        ("hash-object", 0, "dirtyhash\n"),
+    ]);
 
     let (code, out, err) = run(
-        &[
-            "--repo",
-            &repo.root.to_string_lossy(),
-            "workspace",
-            "--gate",
-            "size",
-        ],
+        &["--repo", &repo.root.to_string_lossy(), "--gate", "size"],
         &runner,
     );
 
@@ -328,16 +267,26 @@ fn a_gate_that_never_reached_a_verdict_exits_2_instead_of_1() {
 }
 
 #[test]
-fn a_target_without_a_manifest_is_a_setup_error() {
-    let repo = MiniRepo::build(None);
-    std::fs::remove_file(repo.root.join("frontend/Cargo.toml")).expect("manifest removed");
-    let runner = changed_runner((0, "test result: ok. 1 passed; 0 failed\n"));
+fn a_declared_target_without_a_manifest_is_a_setup_error() {
+    let repo = MiniRepo::build(Some(
+        "
+            version = 1
+
+            [targets.tui]
+            path = \"cli\"
+        ",
+    ));
+    std::fs::remove_file(repo.root.join("cli/Cargo.toml")).expect("manifest removed");
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (0, "test result: ok. 1 passed; 0 failed\n"),
+    );
 
     let (code, _, err) = run(
-        &["--repo", &repo.root.to_string_lossy(), "frontend"],
+        &["--repo", &repo.root.to_string_lossy(), "-p", "tui"],
         &runner,
     );
 
     assert_eq!(code, 2);
-    assert!(err.contains("Cargo.toml"));
+    assert!(err.contains("Cargo.toml"), "{err}");
 }

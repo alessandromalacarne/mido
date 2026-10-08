@@ -24,7 +24,6 @@ pub const LANGS: [Lang; 1] = [Lang::Rust];
 pub struct StepOutcome {
     pub details: Vec<String>,
     pub problems: Vec<String>,
-    pub crate_wide_debt: bool,
 }
 
 /// What a test run's output said, summed over every `test result:` line.
@@ -49,14 +48,6 @@ pub struct MutationReport {
     pub survivors: Vec<String>,
     pub timed_out: Vec<String>,
     pub baseline_failure: Option<String>,
-}
-
-/// How a mutation run is scoped.
-pub struct MutationScope<'a> {
-    pub configured: &'a str,
-    pub scope: crate::targets::Scope,
-    pub changed: &'a [String],
-    pub patch: &'a Path,
 }
 
 impl Lang {
@@ -113,12 +104,9 @@ impl Lang {
         command: &str,
         output: &str,
         returncode: i32,
-        changed: &[String],
     ) -> StepOutcome {
         match self {
-            Lang::Rust => {
-                rust::diagnostics::syntax_outcome(step, command, output, returncode, changed)
-            }
+            Lang::Rust => rust::diagnostics::syntax_outcome(step, command, output, returncode),
         }
     }
 
@@ -243,19 +231,6 @@ impl Lang {
         }
     }
 
-    /// The arguments that scope a mutation run to the config's `scope` setting.
-    pub fn mutation_scope_args(
-        self,
-        runner: &dyn crate::process::Runner,
-        repo: &Path,
-        target: &crate::targets::Target,
-        scoped: MutationScope<'_>,
-    ) -> Result<Vec<String>, GuardrailsError> {
-        match self {
-            Lang::Rust => rust::mutation::scope_args(runner, repo, target, scoped),
-        }
-    }
-
     /// Every target this module can measure in the repo.
     pub fn detect_targets(
         self,
@@ -267,15 +242,15 @@ impl Lang {
         }
     }
 
-    /// Resolve a target name or path as this module understands it.
-    pub fn resolve_target(
+    /// Resolve a `-p` package name as this module understands it.
+    pub fn resolve_package(
         self,
         repo: &Path,
         config: &crate::config::Config,
         spec: &str,
     ) -> Result<crate::targets::Target, GuardrailsError> {
         match self {
-            Lang::Rust => rust::targets::resolve_target(repo, config, spec),
+            Lang::Rust => rust::targets::resolve_package(repo, config, spec),
         }
     }
 

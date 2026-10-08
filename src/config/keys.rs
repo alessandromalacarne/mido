@@ -13,7 +13,7 @@ pub const GATES: [&str; 6] = [
 
 pub const EXTRA_TOP_LEVEL_KEYS: [&str; 2] = ["version", "targets"];
 pub const FAILURE_KEYS: [&str; 1] = ["max_attempts_per_gate"];
-pub const TARGET_KEYS: [&str; 3] = ["path", "scope", "manifest"];
+pub const TARGET_KEYS: [&str; 2] = ["path", "manifest"];
 pub const THRESHOLD_KEYS: [&str; 2] = ["warn", "fail"];
 
 pub fn gate_keys(gate: &str) -> &'static [&'static str] {
@@ -29,14 +29,8 @@ pub fn gate_keys(gate: &str) -> &'static [&'static str] {
         ],
         "analysis" => &["enabled", "tool", "mi_min", "cognitive_max"],
         "tests" => &["enabled", "command", "timeout_secs"],
-        "coverage" => &["enabled", "command", "changed_file_min", "total_drop_max"],
-        "mutation" => &[
-            "enabled",
-            "command",
-            "scope",
-            "timeout_secs",
-            "kill_rate_min",
-        ],
+        "coverage" => &["enabled", "command", "coverage_min", "total_drop_max"],
+        "mutation" => &["enabled", "command", "timeout_secs", "kill_rate_min"],
         _ => &[],
     }
 }
@@ -116,8 +110,8 @@ mod tests {
         let keys = target_keys();
 
         assert!(keys.contains("path"));
-        assert!(keys.contains("scope"));
         assert!(keys.contains("manifest"));
         assert!(keys.contains("tests"));
+        assert!(!keys.contains("scope"), "the diff-scope key is gone");
     }
 }

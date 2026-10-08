@@ -4,16 +4,13 @@ use super::panel::{field, panel, short, status_glyph};
 use super::{blocked_verdict, GateResult, INCOMPLETE, MAX_BANNER_FILES};
 use crate::gate::GATES;
 use crate::style::Style;
-use crate::targets::{Scope, Target};
+use crate::targets::Target;
 
 #[derive(Debug, Clone, Default)]
 pub struct BannerContext<'a> {
-    pub scope: Scope,
-    pub base: &'a str,
     pub revision: &'a str,
     pub dirty: &'a str,
-    pub changed: &'a [String],
-    pub selected_how: &'a str,
+    pub files: &'a [String],
     pub source_label: &'a str,
     pub source_count: usize,
 }
@@ -23,28 +20,20 @@ pub fn render_banner(target: &Target, context: &BannerContext<'_>, style: Style)
         .lines()
         .map(str::to_string)
         .collect();
-    lines.extend(changed_listing(context, style));
+    lines.extend(files_listing(context, style));
     lines.join("\n")
 }
 
 fn banner_rows(target: &Target, context: &BannerContext<'_>) -> Vec<String> {
     vec![
-        field(
-            "target",
-            &format!(
-                "{}{}",
-                target.label(),
-                selected_suffix(context.selected_how)
-            ),
-        ),
-        scope_row(context),
+        field("target", &target.label()),
         field("revision", short(or_unknown(context.revision))),
         field("dirty", short(or_unknown(context.dirty))),
         field(
-            files_label(context.scope),
+            "measured",
             &format!(
                 "{} files ({} {})",
-                context.changed.len(),
+                context.files.len(),
                 context.source_count,
                 context.source_label
             ),
@@ -52,43 +41,18 @@ fn banner_rows(target: &Target, context: &BannerContext<'_>) -> Vec<String> {
     ]
 }
 
-/// The count row says what the files were: the diff's changed set, or the
-/// whole-target run's measured set.
-fn files_label(scope: Scope) -> &'static str {
-    match scope {
-        Scope::Whole => "measured",
-        Scope::Diff | Scope::Paths => "changed",
-    }
-}
-
-fn selected_suffix(selected_how: &str) -> String {
-    if selected_how.is_empty() {
-        String::new()
-    } else {
-        format!(" [{selected_how}]")
-    }
-}
-
-fn scope_row(context: &BannerContext<'_>) -> String {
-    match context.scope {
-        Scope::Paths => field("scope", "explicit paths"),
-        Scope::Whole => field("scope", "whole target (no diff)"),
-        Scope::Diff => field("base", context.base),
-    }
-}
-
-/// The changed files under the panel — capped, with the remainder counted.
-fn changed_listing(context: &BannerContext<'_>, style: Style) -> Vec<String> {
+/// The measured files under the panel — capped, with the remainder counted.
+fn files_listing(context: &BannerContext<'_>, style: Style) -> Vec<String> {
     let mut lines: Vec<String> = context
-        .changed
+        .files
         .iter()
         .take(MAX_BANNER_FILES)
         .map(|path| style.dim(&format!("  {path}")))
         .collect();
-    if context.changed.len() > MAX_BANNER_FILES {
+    if context.files.len() > MAX_BANNER_FILES {
         lines.push(style.dim(&format!(
             "  … and {} more",
-            context.changed.len() - MAX_BANNER_FILES
+            context.files.len() - MAX_BANNER_FILES
         )));
     }
     lines
@@ -107,7 +71,6 @@ pub struct FailureContext<'a> {
     pub target: &'a str,
     pub revision: &'a str,
     pub dirty: &'a str,
-    pub base: &'a str,
     pub attempts: Option<i64>,
 }
 
@@ -138,19 +101,13 @@ fn failure_header(
     context: &FailureContext<'_>,
     style: Style,
 ) -> Vec<String> {
-    let mut rows = vec![
+    let rows = vec![
         style.fail(&blocked_verdict(blocked)),
         field("target", context.target),
         field("revision", short(or_unknown(context.revision))),
         field("dirty", short(or_unknown(context.dirty))),
+        field("failing", &format!("{} of {total} gates", blocked.len())),
     ];
-    if !context.base.is_empty() {
-        rows.push(field("base", context.base));
-    }
-    rows.push(field(
-        "failing",
-        &format!("{} of {total} gates", blocked.len()),
-    ));
 
     let mut lines: Vec<String> = panel("failure", &rows, style)
         .lines()

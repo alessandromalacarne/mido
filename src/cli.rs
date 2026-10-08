@@ -15,15 +15,16 @@ pub use crate::gate::Gate;
 #[command(
     name = "mido",
     version,
-    about = "Run the guardrails ladder (`.mido.toml`) against one target of the repo.",
-    long_about = "Run the guardrails ladder (`.mido.toml`) against one target of the repo.\n\n\
+    about = "Run the guardrails ladder (`.mido.toml`) against the workspace, or the packages `-p` names.",
+    long_about = "Run the guardrails ladder (`.mido.toml`) against the workspace, or the packages `-p` names.\n\n\
+                  Every gate measures the whole target: no diff is read.\n\n\
                   Exit codes: 0 SHIP-READY, 1 BLOCKED, 2 INCOMPLETE.",
     subcommand_precedence_over_arg = true
 )]
 pub struct Args {
-    /// target name or path; default `auto` (inferred from the diff)
-    #[arg(default_value = "auto")]
-    pub target: String,
+    /// package to measure, by cargo package name (repeatable); default: the whole workspace
+    #[arg(short = 'p', long = "package", value_name = "NAME")]
+    pub packages: Vec<String>,
 
     /// language module; default: inferred from the repo (a root Cargo.toml selects rust)
     #[arg(long)]
@@ -33,25 +34,9 @@ pub struct Args {
     #[arg(long)]
     pub repo: Option<PathBuf>,
 
-    /// ref the changed files are computed against
-    #[arg(long)]
-    pub base: Option<String>,
-
-    /// measure these files, folders or target names instead of the diff (repeatable)
-    #[arg(long = "path", value_name = "PATH", conflicts_with = "base")]
-    pub path: Vec<PathBuf>,
-
-    /// measure the whole target instead of the diff; add --path to name specific files
-    #[arg(long = "no-diff", conflicts_with = "base")]
-    pub no_diff: bool,
-
     /// run only this gate (repeatable)
     #[arg(long = "gate")]
     pub gates: Vec<Gate>,
-
-    /// run every target in turn
-    #[arg(long)]
-    pub all: bool,
 
     /// print the detected targets and exit
     #[arg(long = "list-targets")]
@@ -61,7 +46,7 @@ pub struct Args {
     #[arg(long = "apply-workspace-aid")]
     pub apply_workspace_aid: bool,
 
-    /// lcov from the base revision, for the delta
+    /// lcov to compare totals against, for the delta
     #[arg(long = "baseline-lcov")]
     pub baseline_lcov: Option<PathBuf>,
 
@@ -143,8 +128,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_target_is_auto() {
-        assert_eq!(parse_from(&[]).target, "auto");
+    fn without_packages_the_whole_workspace_is_measured() {
+        assert!(parse_from(&[]).packages.is_empty());
+    }
+
+    #[test]
+    fn the_package_flag_is_repeatable_and_has_a_short_form() {
+        assert_eq!(
+            parse_from(&["-p", "lib", "--package", "api"]).packages,
+            vec!["lib", "api"]
+        );
     }
 
     #[test]
@@ -168,63 +161,32 @@ mod tests {
     }
 
     #[test]
-    fn explicit_paths_and_a_base_revision_are_mutually_exclusive() {
-        let rejected = try_parse_from(&["--path", "src", "--base", "origin/mvp"]);
+    fn a_positional_target_is_not_a_target_anymore() {
+        let rejected = try_parse_from(&["frontend"]);
 
-        assert!(
-            rejected.is_err(),
-            "there is no base to diff a path list against"
-        );
+        assert!(rejected.is_err(), "a bare positional is a usage error");
         assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
     }
 
     #[test]
-    fn the_no_diff_flag_is_opt_in() {
-        assert!(!parse_from(&[]).no_diff);
-        assert!(parse_from(&["--no-diff"]).no_diff);
-    }
-
-    #[test]
-    fn a_base_revision_is_rejected_with_no_diff() {
-        let rejected = try_parse_from(&["--no-diff", "--base", "origin/mvp"]);
-
-        assert!(rejected.is_err(), "there is no diff to compute a base for");
-        assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
-    }
-
-    #[test]
-    fn the_no_diff_flag_and_explicit_paths_compose() {
-        let args = parse_from(&["--no-diff", "--path", "src"]);
-
-        assert!(args.no_diff);
-        assert_eq!(args.path, vec![PathBuf::from("src")]);
+    fn the_removed_scope_flags_are_not_accepted() {
+        for flag in ["--base", "--path", "--no-diff", "--all"] {
+            let rejected = try_parse_from(&[flag, "x"]);
+            assert!(rejected.is_err(), "`{flag}` is gone");
+        }
     }
 
     #[test]
     fn flags_argv() {
-        let args = parse_from(&[
-            "--repo",
-            "/tmp/x",
-            "frontend",
-            "--base",
-            "origin/mvp",
-            "--json",
-            "--all",
-        ]);
+        let args = parse_from(&["--repo", "/tmp/x", "-p", "frontend", "--json"]);
 
         assert_eq!(args.repo, Some(PathBuf::from("/tmp/x")));
-        assert_eq!(args.target, "frontend");
-        assert_eq!(args.base.as_deref(), Some("origin/mvp"));
-        assert!(args.json && args.all);
+        assert_eq!(args.packages, vec!["frontend"]);
+        assert!(args.json);
     }
 
     #[test]
     fn the_mcp_subcommand_is_recognized() {
         assert_eq!(parse_from(&["mcp"]).command, Some(Command::Mcp));
-    }
-
-    #[test]
-    fn a_target_that_is_not_a_subcommand_is_still_a_target() {
-        assert_eq!(parse_from(&["frontend"]).target, "frontend");
     }
 }

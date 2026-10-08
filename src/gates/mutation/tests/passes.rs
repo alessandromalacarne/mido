@@ -15,14 +15,19 @@ fn browser_tested_frontend(repo: &MiniRepo) {
 
 /// A gate run over the standalone `frontend` crate — the shape whose target
 /// declares more than one test command.
-fn frontend_run<'a>(repo: &'a MiniRepo, config: &'a Config, changed: &'a [String]) -> GateRun<'a> {
+fn frontend_run<'a>(repo: &'a MiniRepo, config: &'a Config, files: &'a [String]) -> GateRun<'a> {
     let target = Box::leak(Box::new(crate::targets::Target::crate_target(
         "frontend",
         false,
         crate::lang::rust::MANIFEST,
     )));
 
-    gate_run(&repo.root, target, config, changed)
+    gate_run(&repo.root, target, config, files)
+}
+
+/// The measured rust file the mutation gate needs on every run.
+fn rust_files() -> Vec<String> {
+    vec!["src/foo.rs".to_string()]
 }
 
 /// The union fixture: the native suite catches the one mutant it can see and
@@ -52,10 +57,10 @@ fn every_test_command_gets_a_pass_and_the_union_decides_the_verdict() {
     let repo = repo();
     browser_tested_frontend(&repo);
     let config = config_for(&repo);
-    let changed = vec!["src/foo.rs".to_string()];
+    let files = rust_files();
     let stub = native_then_browser();
 
-    let run = frontend_run(&repo, &config, &changed);
+    let run = frontend_run(&repo, &config, &files);
     let result = gate_mutation(&stub, &run);
 
     assert_eq!(result.status, PASS);
@@ -98,7 +103,7 @@ fn a_pass_with_nothing_left_keeps_the_verdict_of_the_earlier_passes() {
     let repo = repo();
     browser_tested_frontend(&repo);
     let config = config_for(&repo);
-    let changed = vec!["src/foo.rs".to_string()];
+    let files = rust_files();
     let stub = MutationStub::new(vec![
         Some(Pass {
             total: 6,
@@ -112,7 +117,7 @@ fn a_pass_with_nothing_left_keeps_the_verdict_of_the_earlier_passes() {
         }),
     ]);
 
-    let run = frontend_run(&repo, &config, &changed);
+    let run = frontend_run(&repo, &config, &files);
     let result = gate_mutation(&stub, &run);
 
     assert_eq!(result.status, PASS);
@@ -135,10 +140,10 @@ fn the_first_pass_keeps_the_configured_command_without_iterate() {
     ));
     browser_tested_frontend(&repo);
     let config = config_for(&repo);
-    let changed = vec!["src/foo.rs".to_string()];
+    let files = rust_files();
     let stub = MutationStub::new(vec![Some(Pass::default()), Some(Pass::default())]);
 
-    let run = frontend_run(&repo, &config, &changed);
+    let run = frontend_run(&repo, &config, &files);
     gate_mutation(&stub, &run);
 
     let calls = stub.mutant_calls();
@@ -166,9 +171,10 @@ fn the_declared_test_command_rides_along_on_the_pass() {
     ",
     ));
     let config = config_for(&repo);
+    let files = rust_files();
     let stub = MutationStub::new(vec![Some(Pass::default())]);
 
-    gate_mutation(&stub, &gate_run_for(&repo, &config, &[]));
+    gate_mutation(&stub, &gate_run_for(&repo, &config, &files));
 
     assert!(
         stub.called_with("-- --all-features"),

@@ -97,7 +97,7 @@ fn a_function_over_two_ceilings_reports_both_but_is_not_near_one() {
 }
 
 #[test]
-fn the_gate_fails_when_a_changed_file_is_over_the_ceiling() {
+fn the_gate_fails_when_a_measured_file_is_over_the_ceiling() {
     let repo = MiniRepo::build(None);
     touch(&repo, "src/foo.rs");
     let config = config_for(&repo);
@@ -105,13 +105,8 @@ fn the_gate_fails_when_a_changed_file_is_over_the_ceiling() {
     let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
     let units = vec![unit("small", 5)];
 
-    let changed = vec!["src/foo.rs".to_string()];
-    let result = gate_size(
-        &runner,
-        &gate_run_for(&repo, &config, &changed),
-        &units,
-        &[],
-    );
+    let files = vec!["src/foo.rs".to_string()];
+    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &units, &[]);
 
     assert_eq!(result.status, FAIL);
     assert!(result.summary.contains("worst function"));
@@ -125,8 +120,8 @@ fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
     let config = config_for(&repo);
     let runner = FakeRunner::with(&[("tokei", 127, "")]);
 
-    let changed = vec!["src/foo.rs".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &changed), &[], &[]);
+    let files = vec!["src/foo.rs".to_string()];
+    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &[], &[]);
 
     assert_eq!(result.status, INCOMPLETE);
     assert!(result
@@ -140,16 +135,16 @@ fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
 }
 
 #[test]
-fn a_change_without_rust_files_passes_as_nothing_to_measure() {
+fn a_target_without_rust_files_passes_as_nothing_to_measure() {
     let repo = MiniRepo::build(None);
     let config = config_for(&repo);
     let runner = FakeRunner::default();
 
-    let changed = vec!["README.md".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &changed), &[], &[]);
+    let files = vec!["README.md".to_string()];
+    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &[], &[]);
 
     assert_eq!(result.status, PASS);
-    assert_eq!(result.summary, "no rust changes");
+    assert_eq!(result.summary, "no rust source files");
     assert!(
         !result
             .details
@@ -169,10 +164,10 @@ fn a_measurement_error_with_units_present_is_still_incomplete() {
     let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
     let errors = vec!["src/bar.rs: rust-code-analysis could not read it".to_string()];
 
-    let changed = vec!["src/foo.rs".to_string()];
+    let files = vec!["src/foo.rs".to_string()];
     let result = gate_size(
         &runner,
-        &gate_run_for(&repo, &config, &changed),
+        &gate_run_for(&repo, &config, &files),
         &[unit("f", 5)],
         &errors,
     );
@@ -188,8 +183,8 @@ fn missing_units_do_not_claim_nesting_was_absent() {
     let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
     let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
 
-    let changed = vec!["src/foo.rs".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &changed), &[], &[]);
+    let files = vec!["src/foo.rs".to_string()];
+    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &[], &[]);
 
     assert!(result
         .details
@@ -212,10 +207,10 @@ fn nesting_absence_is_stated_in_the_evidence() {
     let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
     let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
 
-    let changed = vec!["src/foo.rs".to_string()];
+    let files = vec!["src/foo.rs".to_string()];
     let result = gate_size(
         &runner,
-        &gate_run_for(&repo, &config, &changed),
+        &gate_run_for(&repo, &config, &files),
         &[unit("f", 5)],
         &[],
     );

@@ -55,16 +55,14 @@ pub fn gate_syntax(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
 
     let mut details: Vec<String> = Vec::new();
     let mut problems: Vec<String> = Vec::new();
-    let mut crate_wide_debt = false;
 
     for (name, argv) in &steps {
         let outcome = run_step(runner, run, name, argv, timeout);
         details.extend(outcome.details);
         problems.extend(outcome.problems);
-        crate_wide_debt = crate_wide_debt || outcome.crate_wide_debt;
     }
 
-    syntax_result(contract, crate_wide_debt, details, problems, lang)
+    syntax_result(contract, details, problems, lang)
 }
 
 fn run_step(
@@ -75,11 +73,7 @@ fn run_step(
     timeout: u64,
 ) -> StepOutcome {
     let GateRun {
-        repo,
-        target,
-        changed,
-        lang,
-        ..
+        repo, target, lang, ..
     } = *run;
     let result = process::dev(
         runner,
@@ -90,12 +84,11 @@ fn run_step(
     );
     let output = result.combined();
 
-    lang.syntax_outcome(name, &argv.join(" "), &output, result.code, changed)
+    lang.syntax_outcome(name, &argv.join(" "), &output, result.code)
 }
 
 fn syntax_result(
     contract: String,
-    crate_wide_debt: bool,
     details: Vec<String>,
     problems: Vec<String>,
     lang: Lang,
@@ -107,17 +100,9 @@ fn syntax_result(
         .chain(problems.iter().cloned())
         .collect();
     let (status, summary) = if problems.is_empty() {
-        let summary = if crate_wide_debt {
-            "clean on changed files; crate-wide debt is pre-existing"
-        } else {
-            "clean"
-        };
-        (PASS, summary.to_string())
+        (PASS, "clean".to_string())
     } else {
-        (
-            FAIL,
-            format!("{} problem(s) in changed files", problems.len()),
-        )
+        (FAIL, format!("{} problem(s)", problems.len()))
     };
 
     GateResult::new("syntax", status, summary, evidence)

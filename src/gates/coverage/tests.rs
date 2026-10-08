@@ -68,7 +68,7 @@ fn a_command_without_an_output_flag_defaults_to_lcov_info() {
 }
 
 #[test]
-fn coverage_gate_enforces_the_changed_file_minimum() {
+fn the_gate_enforces_the_total_minimum() {
     let repo = repo();
     // The embedded rust baseline writes `lcov.info` next to the target.
     write_report(
@@ -76,20 +76,38 @@ fn coverage_gate_enforces_the_changed_file_minimum() {
         "SF:/repo/lib/src/foo.rs\nLH:2\nLF:10\nend_of_record\n",
     );
     let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-    let changed = vec!["lib/src/foo.rs".to_string()];
-    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
+    let files = vec!["lib/src/foo.rs".to_string()];
+    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
 
     assert_eq!(result.status, FAIL);
     assert!(result.details.join(" ").contains("20.0%"));
     assert!(result.details.join(" ").contains("min 80"));
+    assert!(result.contract.contains("coverage_min=80"));
+}
+
+#[test]
+fn an_empty_report_is_incomplete_not_a_pass() {
+    let repo = repo();
+    write_report(&repo.root.join("lcov.info"), "");
+    let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
+    let files = vec!["lib/src/foo.rs".to_string()];
+    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
+
+    assert_eq!(result.status, INCOMPLETE);
+    assert!(
+        result.summary.contains("no measurable line"),
+        "{}",
+        result.summary
+    );
+    assert!(result.details.join(" ").contains("unverified, not 100%"));
 }
 
 #[test]
 fn a_missing_report_is_incomplete_not_a_pass() {
     let repo = repo();
     let runner = FakeRunner::with(&[("llvm-cov", 101, "error: no such command")]);
-    let changed = vec!["lib/src/foo.rs".to_string()];
-    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
+    let files = vec!["lib/src/foo.rs".to_string()];
+    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
 
     assert_eq!(result.status, INCOMPLETE);
     assert!(result
@@ -100,26 +118,11 @@ fn a_missing_report_is_incomplete_not_a_pass() {
 }
 
 #[test]
-fn changed_files_absent_from_the_report_are_called_unverified() {
-    let repo = repo();
-    write_report(
-        &repo.root.join("lcov.info"),
-        "SF:/repo/lib/src/other.rs\nLH:10\nLF:10\nend_of_record\n",
-    );
-    let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-    let changed = vec!["lib/src/foo.rs".to_string()];
-    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
-
-    assert_eq!(result.status, PASS);
-    assert!(result.details.join(" ").contains("unverified, not 100%"));
-}
-
-#[test]
 fn a_total_drop_beyond_the_allowance_fails_the_gate() {
     let repo = repo();
     write_report(
         &repo.root.join("lcov.info"),
-        "SF:/repo/lib/src/foo.rs\nLH:5\nLF:10\nend_of_record\n",
+        "SF:/repo/lib/src/foo.rs\nLH:9\nLF:10\nend_of_record\n",
     );
     let baseline = repo.root.join("baseline.info");
     write_report(
@@ -127,9 +130,9 @@ fn a_total_drop_beyond_the_allowance_fails_the_gate() {
         "SF:/repo/lib/src/foo.rs\nLH:10\nLF:10\nend_of_record\n",
     );
     let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-    let changed = vec!["lib/src/foo.rs".to_string()];
+    let files = vec!["lib/src/foo.rs".to_string()];
     let config = config_for(&repo);
-    let mut run = gate_run_for(&repo, &config, &changed);
+    let mut run = gate_run_for(&repo, &config, &files);
     run.baseline_lcov = Some(&baseline);
     let result = gate_coverage(&runner, &run);
 
@@ -137,7 +140,7 @@ fn a_total_drop_beyond_the_allowance_fails_the_gate() {
     assert!(result
         .details
         .join(" ")
-        .contains("coverage dropped -50.0 points"));
+        .contains("coverage dropped -10.0 points"));
 }
 
 #[test]
@@ -149,43 +152,19 @@ fn without_a_baseline_the_delta_is_reported_as_not_measured() {
 }
 
 #[test]
-fn a_file_missing_from_the_changed_list_is_not_judged() {
-    let files = BTreeMap::from([(
-        "/repo/lib/src/other.rs".to_string(),
-        LcovStat {
-            lines_found: 10,
-            lines_hit: 1,
-        },
-    )]);
-
-    let (problems, details) = judge_changed_coverage(
-        &files,
-        &["lib/src/foo.rs".to_string()],
-        &Target::workspace_target("Cargo.toml"),
-        80.0,
-    );
+fn totals_above_the_floor_pass() {
+    let (problems, details) = judge_total_coverage((9, 10), 80.0);
 
     assert!(problems.is_empty());
-    assert_eq!(details.len(), 1);
+    assert!(details[0].contains("90.0%"));
+    assert!(details[0].contains("(min 80, ok)"));
 }
 
 #[test]
-fn changed_files_are_shown_relative_to_the_target() {
-    let files = BTreeMap::from([(
-        "/repo/frontend/src/main.rs".to_string(),
-        LcovStat {
-            lines_found: 2,
-            lines_hit: 2,
-        },
-    )]);
+fn totals_below_the_floor_fail() {
+    let (problems, details) = judge_total_coverage((2, 10), 80.0);
 
-    let (problems, details) = judge_changed_coverage(
-        &files,
-        &["frontend/src/main.rs".to_string()],
-        &Target::crate_target("frontend", false, "Cargo.toml"),
-        80.0,
-    );
-
-    assert!(problems.is_empty());
-    assert!(details[0].starts_with("changed file src/main.rs: 2/2 = 100.0% (ok)"));
+    assert_eq!(problems.len(), 1);
+    assert!(problems[0].contains("total coverage 20.0% (min 80)"));
+    assert!(details[0].contains("FAIL"));
 }

@@ -15,7 +15,7 @@ use crate::metrics::Unit;
 use crate::process::Runner;
 use crate::report::{gate_line, gate_progress_line, GateResult, SKIPPED};
 use crate::style::Style;
-use crate::targets::{Scope, Target};
+use crate::targets::Target;
 use std::io::Write;
 use std::path::Path;
 
@@ -25,8 +25,8 @@ pub struct GateRun<'a> {
     pub target: &'a Target,
     pub config: &'a Config,
     pub lang: Lang,
-    pub scope: Scope,
-    pub changed: &'a [String],
+    /// The target's own files, scoped from what git sees.
+    pub files: &'a [String],
     pub gates: &'a [Gate],
     pub scratch: &'a Path,
     pub baseline_lcov: Option<&'a Path>,
@@ -38,16 +38,16 @@ pub fn run_gates(
     out: &mut dyn Write,
     style: Style,
 ) -> Vec<GateResult> {
-    let source_changed = existing_sources(run);
+    let source_files = existing_sources(run);
     let mut tool_errors: Vec<String> = Vec::new();
-    let units = measured_units(runner, run, &source_changed, &mut tool_errors);
+    let units = measured_units(runner, run, &source_files, &mut tool_errors);
     run_each(runner, run, &units, &tool_errors, out, style)
 }
 
-/// The changed files that still exist — the counting tools choke on a path
+/// The measured files that still exist — the counting tools choke on a path
 /// that is not there, so deleted files never reach them.
 fn existing_sources(run: &GateRun<'_>) -> Vec<String> {
-    run.changed
+    run.files
         .iter()
         .filter(|path| run.lang.is_source(path) && run.repo.join(path).exists())
         .cloned()
@@ -59,18 +59,18 @@ fn existing_sources(run: &GateRun<'_>) -> Vec<String> {
 fn measured_units(
     runner: &dyn Runner,
     run: &GateRun<'_>,
-    source_changed: &[String],
+    source_files: &[String],
     tool_errors: &mut Vec<String>,
 ) -> Vec<Unit> {
     let wants_units = run
         .gates
         .iter()
         .any(|gate| matches!(gate, Gate::Size | Gate::Analysis));
-    if source_changed.is_empty() || !wants_units {
+    if source_files.is_empty() || !wants_units {
         return Vec::new();
     }
     run.lang
-        .analysis_units(runner, run.repo, run.target, source_changed, tool_errors)
+        .analysis_units(runner, run.repo, run.target, source_files, tool_errors)
 }
 
 /// Every selected gate, in turn, with its line and evidence printed.

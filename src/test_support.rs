@@ -3,25 +3,23 @@ use crate::gates::GateRun;
 use crate::lang::Lang;
 use crate::process::{Command, Outcome, Runner};
 use crate::session::Session;
-use crate::targets::{Scope, Target};
+use crate::targets::Target;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
 
-/// A `GateRun` for tests: the rust module, diff scope, scratch at the repo root.
+/// A `GateRun` for tests: the rust module, the given files, scratch at the repo root.
 pub fn gate_run<'a>(
     repo: &'a Path,
     target: &'a Target,
     config: &'a Config,
-    changed: &'a [String],
+    files: &'a [String],
 ) -> GateRun<'a> {
     GateRun {
         repo,
         target,
         config,
         lang: Lang::Rust,
-        scope: Scope::Diff,
-        changed,
+        files,
         gates: &[],
         scratch: repo,
         baseline_lcov: None,
@@ -33,10 +31,10 @@ pub fn gate_run<'a>(
 pub fn gate_run_for<'a>(
     repo: &'a MiniRepo,
     config: &'a Config,
-    changed: &'a [String],
+    files: &'a [String],
 ) -> GateRun<'a> {
     let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
-    gate_run(&repo.root, target, config, changed)
+    gate_run(&repo.root, target, config, files)
 }
 
 /// The rust baseline loaded over a fixture repo.
@@ -81,9 +79,7 @@ pub fn session_for(repo: &MiniRepo, config: Config) -> Session {
         repo: repo.root.clone(),
         config,
         lang: Lang::Rust,
-        scope: Scope::Diff,
-        base: "HEAD".to_string(),
-        changed: Vec::new(),
+        files: Vec::new(),
         revision: "abc".to_string(),
         dirty: "def".to_string(),
         gates: crate::gate::GATES.to_vec(),
@@ -92,7 +88,6 @@ pub fn session_for(repo: &MiniRepo, config: Config) -> Session {
         report_path: None,
         apply_aid: false,
         as_json: false,
-        selection: "auto".to_string(),
     }
 }
 
@@ -121,11 +116,10 @@ pub fn run_cli(argv: &[&str], runner: &FakeRunner) -> (i32, String, String) {
     )
 }
 
-/// A runner whose git answers say "one changed file under lib/".
-pub fn changed_runner(tests: (i32, &str)) -> FakeRunner {
+/// A runner whose git answers list `files` and whose tests command answers `tests`.
+pub fn repo_runner(files: &str, tests: (i32, &str)) -> FakeRunner {
     FakeRunner::with(&[
-        ("merge-base", 0, "base\n"),
-        ("--name-only", 0, "lib/src/foo.rs\n"),
+        ("ls-files", 0, files),
         ("hash-object", 0, "dirtyhash\n"),
         ("cargo test", tests.0, tests.1),
     ])
@@ -236,33 +230,6 @@ impl MiniRepo {
         }
         Self { root, _tmp: tmp }
     }
-
-    pub fn git(&self) -> &Self {
-        run_git(&self.root, &["init", "-q", "-b", "main"]);
-        run_git(&self.root, &["add", "-A"]);
-        run_git(
-            &self.root,
-            &[
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "user.name=t",
-                "commit",
-                "-qm",
-                "base",
-            ],
-        );
-        self
-    }
-}
-
-fn run_git(root: &std::path::Path, args: &[&str]) {
-    let status = StdCommand::new("git")
-        .args(args)
-        .current_dir(root)
-        .status()
-        .expect("git runs");
-    assert!(status.success(), "git {args:?} failed");
 }
 
 /// `textwrap.dedent`: drop the common indentation, keep every line — including

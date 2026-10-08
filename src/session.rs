@@ -15,7 +15,7 @@ use crate::lang::Lang;
 use crate::process::{self, Runner};
 use crate::report::{exit_code, render_failure, verdict, FailureContext, GateResult};
 use crate::style::Style;
-use crate::targets::{scope_changed, Scope, Target};
+use crate::targets::{target_files, Target};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -31,9 +31,8 @@ pub struct Session {
     pub repo: PathBuf,
     pub config: Config,
     pub lang: Lang,
-    pub scope: Scope,
-    pub base: String,
-    pub changed: Vec<String>,
+    /// Every file git sees; a target's own set is scoped from this.
+    pub files: Vec<String>,
     pub revision: String,
     pub dirty: String,
     pub gates: Vec<Gate>,
@@ -42,7 +41,6 @@ pub struct Session {
     pub report_path: Option<PathBuf>,
     pub apply_aid: bool,
     pub as_json: bool,
-    pub selection: String,
 }
 
 pub fn scratch_dir() -> PathBuf {
@@ -103,8 +101,14 @@ pub fn run_session(args: &Args, runner: &dyn Runner, io: &mut Io<'_>) -> Result<
         return Err(RunError::Error(lang.no_targets_error(&repo)));
     }
 
+    let selected = select_targets(args, &repo, &config, lang, &targets)?;
     let session = build_session(args, &repo, config, runner, lang)?;
-    measure_selected(runner, args, &session, &targets, io)
+    if session.files.is_empty() {
+        report_no_files(io);
+        return Ok(2);
+    }
+
+    measure_selected(runner, &session, &selected, &targets, io)
 }
 
 /// The repo the run measures: the one `--repo` names, canonicalized, or the cwd.
@@ -120,19 +124,23 @@ fn open_repo(args: &Args, runner: &dyn Runner) -> PathBuf {
 /// The selected targets, measured in turn; the exit code the run earns.
 fn measure_selected(
     runner: &dyn Runner,
-    args: &Args,
     session: &Session,
+    selected: &[Target],
     targets: &BTreeMap<String, Target>,
     io: &mut Io<'_>,
 ) -> Result<i32, RunError> {
-    let Some(selected) = select_targets(args, session, targets, io.out, io.style)? else {
-        return Ok(2);
-    };
+    let mut reports: Vec<String> = Vec::new();
 
-    let (measured, reports) = measure(runner, session, &selected, io)?;
-    if !measured {
-        report_no_gates(io);
-        return Ok(2);
+    for target in selected {
+        let scoped = target_files(&session.files, target, targets);
+        let results = run_target(runner, session, target, &scoped, io)?;
+
+        print_verdict(io.out, session, target, &results, io.style);
+        reports.push(markdown_report(session, target, &scoped, &results));
+
+        if exit_code(&results) != 0 {
+            return Err(raise_blocked(session, target, &results, &reports, io));
+        }
     }
 
     write_report(session.report_path.as_deref(), &reports, io.out, io.style);
@@ -154,75 +162,41 @@ fn announce_warnings(config: &Config, io: &mut Io<'_>) {
     }
 }
 
-/// Every selected target, in turn; the first blocked one ends the run.
-fn measure(
-    runner: &dyn Runner,
-    session: &Session,
-    selected: &[Target],
-    io: &mut Io<'_>,
-) -> Result<(bool, Vec<String>), RunError> {
-    let mut reports: Vec<String> = Vec::new();
-    let mut measured = false;
-
-    for target in selected {
-        let Some(results) = run_target(runner, session, target, io)? else {
-            continue;
-        };
-
-        measured = true;
-        print_verdict(io.out, session, target, &results, io.style);
-        reports.push(markdown_report(session, target, &results));
-
-        if exit_code(&results) != 0 {
-            return Err(raise_blocked(session, target, &results, &reports, io));
-        }
-    }
-
-    Ok((measured, reports))
-}
-
-/// The gates for one target; `None` when the target owns none of the diff.
+/// The gates for one target: the whole target, no diff.
 pub fn run_target(
     runner: &dyn Runner,
     session: &Session,
     target: &Target,
+    files: &[String],
     io: &mut Io<'_>,
-) -> Result<Option<Vec<GateResult>>, GuardrailsError> {
-    let scoped = scope_changed(&session.changed, target);
+) -> Result<Vec<GateResult>, GuardrailsError> {
     let _ = writeln!(
         io.out,
         "{}",
-        output::target_banner(session, target, &scoped, io.style)
+        output::target_banner(session, target, files, io.style)
     );
     let _ = writeln!(io.out);
-
-    if scoped.is_empty() {
-        let _ = writeln!(io.out, "{}\n", output::skip_note(target, io.style));
-        return Ok(None);
-    }
 
     session
         .lang
         .validate_target_setup(runner, &session.repo, target, session.apply_aid, io.out)?;
 
-    let results = run_gates(
+    Ok(run_gates(
         runner,
-        &gate_run(session, target, &scoped),
+        &gate_run(session, target, files),
         io.out,
         io.style,
-    );
-    Ok(Some(results))
+    ))
 }
 
 /// The contract between the orchestration and the gates for one target.
-fn gate_run<'a>(session: &'a Session, target: &'a Target, scoped: &'a [String]) -> GateRun<'a> {
+fn gate_run<'a>(session: &'a Session, target: &'a Target, files: &'a [String]) -> GateRun<'a> {
     GateRun {
         repo: &session.repo,
         target,
         config: &session.config,
         lang: session.lang,
-        scope: session.scope,
-        changed: scoped,
+        files,
         gates: &session.gates,
         scratch: &session.scratch,
         baseline_lcov: session.baseline_lcov.as_deref(),
@@ -245,7 +219,6 @@ fn raise_blocked(
             target: &target.label(),
             revision: &session.revision,
             dirty: &session.dirty,
-            base: &session.base,
             attempts,
         },
         io.style,
@@ -259,16 +232,16 @@ fn raise_blocked(
 }
 
 /// Nothing ran, so nothing passed: exit 2, never a verdict.
-fn report_no_gates(io: &mut Io<'_>) {
+fn report_no_files(io: &mut Io<'_>) {
     let _ = writeln!(
         io.out,
-        "no gate ran: no changed file belongs to any of the selected target(s)."
+        "nothing to measure: git lists no file in this repository — no tracked file, no untracked one.\n"
     );
     let _ = writeln!(
         io.out,
         "{}",
         io.style
-            .dim("A gate that did not run is not a gate that passed — nothing here is ship-ready.")
+            .dim("The ladder measures the files git sees; run it inside a git repository that holds some.")
     );
 }
 

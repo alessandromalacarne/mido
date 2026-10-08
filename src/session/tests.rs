@@ -2,7 +2,7 @@ use super::*;
 use crate::cli::parse_from;
 use crate::gate::GATES;
 use crate::lang::Lang;
-use crate::test_support::{config_for, session_for, FakeRunner, MiniRepo};
+use crate::test_support::{config_for, FakeRunner, MiniRepo};
 
 mod output;
 mod run;
@@ -44,104 +44,74 @@ fn a_run_without_a_gate_selection_uses_all_six() {
 }
 
 #[test]
-fn a_target_owning_none_of_the_diff_is_skipped_with_a_note() {
+fn a_bare_run_selects_the_workspace() {
     let repo = MiniRepo::build(None);
-    let session = Session {
-        changed: vec!["lib/src/foo.rs".to_string()],
-        ..session_for(&repo, config_for(&repo))
-    };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let mut io = Io {
-        out: &mut out,
-        err: &mut err,
-        style: crate::style::Style::plain(),
-    };
+    let config = config_for(&repo);
+    let targets = Lang::Rust.detect_targets(&repo.root, &config);
 
-    let results = run_target(
-        &FakeRunner::default(),
-        &session,
-        &Target::crate_target("frontend", false, "Cargo.toml"),
-        &mut io,
-    )
-    .expect("no setup error");
+    let selected = select_targets(&parse_from(&[]), &repo.root, &config, Lang::Rust, &targets)
+        .expect("selection is fine");
 
-    assert!(results.is_none());
-    assert!(
-        String::from_utf8_lossy(&out).contains("no changed file belongs to frontend (frontend/)")
-    );
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].name, "workspace");
+    assert_eq!(selected[0].path, "");
 }
 
 #[test]
-fn a_check_that_never_ran_is_reported_as_not_ship_ready() {
+fn minus_p_selects_packages_by_name() {
     let repo = MiniRepo::build(None);
-    let session = Session {
-        changed: vec!["README.md".to_string()],
-        gates: vec![Gate::Tests],
-        ..session_for(&repo, config_for(&repo))
-    };
-    let targets = Lang::Rust.detect_targets(&repo.root, &session.config);
-    let mut out = Vec::new();
+    let config = config_for(&repo);
+    let targets = Lang::Rust.detect_targets(&repo.root, &config);
 
     let selected = select_targets(
-        &parse_from(&["--repo", "."]),
-        &session,
+        &parse_from(&["-p", "lib"]),
+        &repo.root,
+        &config,
+        Lang::Rust,
         &targets,
-        &mut out,
-        crate::style::Style::plain(),
     )
     .expect("selection is fine");
 
-    assert!(selected.is_none());
-    assert!(String::from_utf8_lossy(&out).contains("nothing to measure"));
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].name, "lib");
+    assert_eq!(selected[0].path, "lib");
 }
 
 #[test]
-fn every_target_can_be_selected_with_all() {
-    let repo = MiniRepo::build(None);
-    let session = Session {
-        changed: vec!["lib/src/foo.rs".to_string()],
-        gates: vec![Gate::Tests],
-        ..session_for(&repo, config_for(&repo))
-    };
-    let targets = Lang::Rust.detect_targets(&repo.root, &session.config);
-
-    let selected = select_targets(
-        &parse_from(&["--all"]),
-        &session,
-        &targets,
-        &mut Vec::new(),
-        crate::style::Style::plain(),
-    )
-    .expect("selection is fine")
-    .expect("targets selected");
-
-    assert!(selected.iter().any(|target| target.name == "workspace"));
-    assert!(selected.iter().any(|target| target.name == "frontend"));
-}
-
-#[test]
-fn the_session_records_how_the_target_was_chosen() {
+fn repeating_a_package_selects_it_once() {
     let repo = MiniRepo::build(None);
     let config = config_for(&repo);
-    let runner = FakeRunner::default();
+    let targets = Lang::Rust.detect_targets(&repo.root, &config);
 
-    let auto = build_session(
-        &parse_from(&["--repo", "."]),
+    let selected = select_targets(
+        &parse_from(&["-p", "lib", "-p", "lib", "-p", "frontend"]),
         &repo.root,
-        config.clone(),
-        &runner,
+        &config,
         Lang::Rust,
+        &targets,
     )
-    .expect("session");
-    assert_eq!(auto.selection, "auto");
+    .expect("selection is fine");
 
-    let requested = build_session(
-        &parse_from(&["--repo", ".", "frontend"]),
+    let names: Vec<&str> = selected.iter().map(|target| target.name.as_str()).collect();
+    assert_eq!(names, vec!["lib", "frontend"]);
+}
+
+#[test]
+fn an_unknown_package_is_a_setup_error() {
+    let repo = MiniRepo::build(None);
+    let config = config_for(&repo);
+    let targets = Lang::Rust.detect_targets(&repo.root, &config);
+
+    let message = select_targets(
+        &parse_from(&["-p", "nope"]),
         &repo.root,
-        config,
-        &runner,
+        &config,
         Lang::Rust,
+        &targets,
     )
-    .expect("session");
-    assert_eq!(requested.selection, "requested");
+    .expect_err("unknown package")
+    .render();
+
+    assert!(message.contains("package `nope` not found"), "{message}");
+    assert!(message.contains("frontend"), "{message}");
 }

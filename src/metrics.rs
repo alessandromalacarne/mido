@@ -1,6 +1,5 @@
 //! Readings the gates judge: function units and lcov reports.
 
-use crate::targets::Target;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -84,31 +83,9 @@ pub fn percent(hit: i64, found: i64) -> f64 {
     }
 }
 
-pub fn relative_to(path: &str, target: &Target) -> String {
-    let marker = if target.path.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{}/", target.path)
-    };
-    match path.find(&marker) {
-        Some(index) => path[index + marker.len()..].to_string(),
-        None => path.to_string(),
-    }
-}
-
-pub fn touches(diagnostic_path: &str, changed: &[String]) -> bool {
-    changed
-        .iter()
-        .any(|path| diagnostic_path.ends_with(path.as_str()) || path.ends_with(diagnostic_path))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn target() -> Target {
-        Target::crate_target("frontend", false, "Cargo.toml")
-    }
 
     #[test]
     fn lcov_counts_each_source_file() {
@@ -148,30 +125,5 @@ mod tests {
     fn percent_handles_the_empty_denominator() {
         assert_eq!(percent(0, 0), 0.0);
         assert_eq!(percent(2, 10), 20.0);
-    }
-
-    #[test]
-    fn paths_are_shown_relative_to_the_target() {
-        assert_eq!(
-            relative_to("/repo/frontend/src/main.rs", &target()),
-            "src/main.rs"
-        );
-        assert_eq!(
-            relative_to(
-                "/repo/frontend/src/main.rs",
-                &Target::workspace_target("Cargo.toml")
-            ),
-            "repo/frontend/src/main.rs"
-        );
-        assert_eq!(relative_to("src/main.rs", &target()), "src/main.rs");
-    }
-
-    #[test]
-    fn a_diagnostic_touches_a_changed_file_in_either_direction() {
-        let changed = vec!["src/main.rs".to_string()];
-
-        assert!(touches("src/main.rs", &changed));
-        assert!(touches("/abs/path/src/main.rs", &changed));
-        assert!(!touches("src/other.rs", &changed));
     }
 }
