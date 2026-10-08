@@ -1,8 +1,9 @@
 # AGENTS.md — working in mido
 
 `mido` is the guardrails runner: one Rust crate (library + `mido` binary) that
-runs the six-gate verification ladder described by `.mido.toml` against one
-target of a repo. The crate dogfoods its own ladder: `.mido.toml` in this repo
+runs the six-gate verification ladder described by `.mido.toml` against the
+whole workspace of a repo, or the packages `-p` names. The crate dogfoods its
+own ladder: `.mido.toml` in this repo
 is the real config, and the runner is `src/main.rs`.
 
 ## Commands
@@ -32,15 +33,15 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
   language-generic; new behavior for rust belongs here, not in `gates/`.
 - `src/gates/` — gate judgement and verdicts. Each gate takes a `GateRun` and
   returns a `GateResult`; dispatch in `gates/mod.rs` is exhaustive over `Gate`.
-- `src/session.rs` (+ `session/setup.rs`, `session/output.rs`) — one run: scope
-  resolution, target selection, measurement, printing.
+- `src/session.rs` (+ `session/setup.rs`, `session/output.rs`) — one run: target
+  selection, file scoping, measurement, printing.
 - `src/config/` — `.mido.toml` loading, strict validation, and the layered
   access rule: module defaults ← repo file ← `[targets.<name>]`.
 - `src/report.rs` (+ `report/panel.rs`, `report/views.rs`, `report/markdown.rs`)
   — verdicts, gate lines, panels, failure report, markdown report.
 - `src/process.rs` (+ `process/git.rs`) — subprocess execution and git queries.
 - `src/metrics.rs` — `Unit` (function metrics) and lcov readings.
-- `src/targets.rs` (+ `targets/paths.rs`) — target scoping and `--path` lists.
+- `src/targets.rs` — target scoping and the measured file set.
 - `src/mcp.rs` + `src/mcp/` — the MCP server; it reuses the CLI in-process
   (`cli::try_parse_from` + `cli::main_with`), so a new CLI flag is one flag
   table update in `mcp/tools.rs` away from being served.

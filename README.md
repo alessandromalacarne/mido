@@ -5,8 +5,8 @@
 
 Like the Kokiri who won't let you into the forest without proof you're ready,
 `mido` won't let a change through without proof it holds. It runs the six-gate
-verification ladder described by `.mido.toml` against one target of the
-repo, and blocks the way until every gate passes.
+verification ladder described by `.mido.toml` against the whole workspace — or
+the packages you name — and blocks the way until every gate passes.
 
 ## Documentation
 
@@ -57,8 +57,8 @@ mido is not a linter framework. The ladder is the opinion, and it does not bend.
 
 If an agent wrote the code, something has to prove the code holds. mido enforces
 the floor, in cost order: it compiles and passes the formatter, linter and type
-checker; it is small enough to read; it is tested; the tests cover the new
-lines; and the tests actually assert — mutants die. That is the minimum a
+checker; it is small enough to read; it is tested; the tests cover the code;
+and the tests actually assert — mutants die. That is the minimum a
 project built with LLMs should not ship below. Start by copying this repo's
 `.mido.toml`, and run `mido` before every handoff.
 
@@ -70,9 +70,10 @@ project built with LLMs should not ship below. Start by copying this repo's
   output parsers, target detection, the workspace aid and the embedded baseline
   contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
   module recognizes exits 2 and says so.
-- Scopes the run to one **target** — the workspace, a member crate, a standalone
-  crate, or one declared in the config. By default the target is inferred from
-  the diff; `--path` measures the files, folders or targets you name instead.
+- Measures the **whole workspace** — no diff is read. `-p NAME` (repeatable,
+  cargo package semantics: the name the manifest declares) narrows the run to
+  the packages you name, each measured whole: the workspace roll-up is what
+  runs without one.
 - Stamps the verdict on the exact revision it measured (`HEAD` plus a dirty-state
   hash), so a green verdict cannot be reused on changed code.
 - Prints a failure report meant for the next reader (human or agent): gate
@@ -85,18 +86,18 @@ project built with LLMs should not ship below. Start by copying this repo's
 
 | # | Gate | What it enforces | Tooling |
 |---|------|------------------|---------|
-| 1 | `syntax` | formatter, linter, type checker pass on the changed files | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` (argv configurable) |
+| 1 | `syntax` | formatter, linter, type checker pass on the measured target | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` (argv configurable) |
 | 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | `tokei` + `rust-code-analysis` |
 | 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis` |
 | 4 | `tests` | the test command passes | `cargo test` (argv configurable) |
-| 5 | `coverage` | changed-file line coverage, total coverage drop vs a baseline | `cargo llvm-cov` (lcov) |
-| 6 | `mutation` | percentage of mutants killed in the changed code | `cargo-mutants` |
+| 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | `cargo llvm-cov` (lcov) |
+| 6 | `mutation` | percentage of mutants killed in the package | `cargo-mutants` |
 
 Built-in defaults, all overridable in `.mido.toml`:
 
 - **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4
 - **analysis** — maintainability index ≥ 20; cognitive complexity ≤ 15
-- **coverage** — changed files ≥ 80%; total drop ≤ 0 points
+- **coverage** — total ≥ 80%; drop ≤ 0 points
 - **mutation** — kill rate ≥ 70%
 - **timeouts** — syntax 1800s, tests 900s, mutation 3600s
 
@@ -120,18 +121,18 @@ verdict panel closes it.
 
 ```
 ╭─ mido ──────────────────────────────────────────────╮
-│ target   workspace (./) [auto]                      │
-│ base     origin/master                              │
+│ target   workspace (./)                             │
 │ revision febf29d1                                   │
 │ dirty    bddc06f7                                   │
-│ changed  1 files (1 rust)                           │
+│ measured 14 files (14 rust)                         │
 ╰─────────────────────────────────────────────────────╯
+  Cargo.toml
   src/style.rs
 
   [1/1] ✓ syntax  clean
-      format: 0 file(s) with diffs, 0 of them changed here
-      lint: 0 diagnostic(s), 0 of them in changed files
-      typecheck: 0 diagnostic(s), 0 of them in changed files
+      format: 0 file(s) with diffs
+      lint: 0 diagnostic(s)
+      typecheck: 0 diagnostic(s)
 
 ╭─ verdict ──╮
 │ SHIP-READY │
@@ -198,33 +199,28 @@ carries all of them.
 ## Usage
 
 ```
-mido [TARGET] [--lang LANG] [--repo PATH] [--base REF] [--no-diff] [--path PATH]…
-     [--gate GATE]… [--all] [--list-targets] [--apply-workspace-aid]
+mido [-p NAME]… [--lang LANG] [--repo PATH] [--gate GATE]…
+     [--list-targets] [--apply-workspace-aid]
      [--baseline-lcov PATH] [--report PATH] [--json]
 mido mcp
 ```
 
 ```sh
-mido                          # infer the target from the diff
-mido frontend                 # one target, by name or path
+mido                          # measure the whole workspace
+mido -p lib                   # measure one package in full
+mido -p lib -p cli            # … several packages, in turn
 mido --lang rust              # force the language module; default: inferred from the repo
-mido --all                    # every detected target, in turn
 mido --list-targets           # show what can be measured, then exit
-mido --base origin/main       # measure against another base
-mido --no-diff                # measure the whole target; no diff is read
-mido --no-diff --path lib/src/lib.rs    # … or just this file
-mido --path src/gates        # measure these paths instead; no diff is read
-mido --path lib/src/lib.rs --path cli   # repeat for a file and a target name
 mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
 mido --report out.md          # write the markdown report
-mido --baseline-lcov base.info         # coverage delta against a base revision
+mido --baseline-lcov base.info         # coverage delta against a previous lcov
 mido mcp                      # serve the ladder as MCP tools on stdio
 ```
 
-The base is picked automatically when `--base` is omitted:
-`origin/mvp` → `origin/develop` → `origin/master` → `HEAD`. Changed files are
-the merge-base diff plus staged and untracked files.
+`-p` resolves the way cargo resolves `--package`: by the name the target's
+manifest declares, with a declared `[targets.<name>]` name accepted too. An
+unknown name is a setup error (exit 2) — never a silent whole-workspace run.
 
 ## MCP server
 
@@ -251,60 +247,29 @@ Two tools, each the CLI surface for one job:
   `0` — `1` BLOCKED (the failure report inside is the handoff), `2` INCOMPLETE
   or a setup error. `tests` and `mutation` run for as long as the CLI takes.
 
-Every argument maps to a flag of the same name (`target`, `repo`, `base`,
-`paths`, `no_diff`, `gates`, `all`, `apply_workspace_aid`, `baseline_lcov`,
-`report`, `json`), so the CLI's rules — `--path` conflicts with `--base`,
-unknown targets are errors — apply unchanged; a typo in an argument name is
-rejected, not dropped. stdout carries protocol messages only; anything the
-server itself has to say goes to stderr.
+Every argument maps to a flag (`packages` maps to `-p`, alongside `repo`,
+`lang`, `gates`, `apply_workspace_aid`, `baseline_lcov`, `report`, `json`), so
+the CLI's rules — an unknown package is a setup error, and so is anything the
+server does not know — apply unchanged; a typo in an argument name is rejected,
+not dropped. stdout carries protocol messages only; anything the server itself
+has to say goes to stderr.
 
-## Measuring paths instead of a diff
+## Workspace and packages
 
-`--path` replaces the diff as the source of the scope. Use it when there is no
-diff worth reading — a fresh checkout, re-verifying a corner of the tree, or a
-review of code nobody touched.
+Every gate measures the whole target; no diff is read. Without `-p`, that target
+is the **workspace** roll-up: the crate at the repo root, or the workspace those
+members belong to, minus the crates the root manifest excludes. The measured set
+is every file git can see — tracked files plus untracked ones that are not
+ignored — scoped to the target: size, syntax and analysis measure them all, the
+tests gate runs the target's commands, and the coverage and mutation gates run
+whole-package tools. A repository git lists no file for measures nothing and
+exits 2.
 
-The flag is repeatable — `--path a --path b` — and each entry is resolved
-against the repo:
-
-- a **file** is measured as it is;
-- a **folder** is walked, hidden entries skipped, in a stable order;
-- a **target name** (`workspace`, a member, a standalone crate, a declared
-  target) resolves to that target's directory.
-
-The rest of the ladder is unchanged. The `auto` target is still inferred — from
-the paths instead of the diff — a named target still wins, `--all` still walks
-every target, and each target measures only the paths it owns; a target owning
-none of them is skipped, exactly as with a diff. The banner and the report print
-`scope  explicit paths` where a diff-based run prints its `base`, and the
-mutation gate mutates the named files instead of a diff patch.
-
-`--path` and `--base` are mutually exclusive — there is no base to diff a path
-list against — and a path that does not exist, or lives outside the repo, is a
-setup error (exit 2).
-
-## Measuring the whole target (`--no-diff`)
-
-`--no-diff` runs the ladder independent of the diff: no base is picked and no
-`merge-base`/`git diff` is read. The scope is every file git can see — tracked
-files plus untracked ones that are not ignored. Use it when there is no diff to
-scope by: a fully committed tree, a shallow checkout, or an audit of code
-nobody touched.
-
-Everything downstream treats those files as the scope: size, analysis, syntax
-and coverage measure every source file of the target, the tests gate runs the
-target's commands, and the mutation gate mutates the whole package instead of a
-diff patch. The banner and the report print `scope  whole target (no diff)` and
-count `measured` files where a diff-based run prints its `base` and `changed`
-files.
-
-- With no target named, `auto` falls back to the **workspace** roll-up — there
-  is no diff to infer from. `mido --no-diff lib` measures that member;
-  `mido --no-diff --all` measures every target in turn.
-- `--no-diff --path <file|folder|target>` narrows the run to exactly those
-  paths, composed the same way `--path` works on its own.
-- `--no-diff` and `--base` are mutually exclusive. A repository git lists no
-  file for measures nothing and exits 2.
+`-p NAME` picks packages instead, resolved the way cargo resolves `--package`:
+the name the target's manifest declares, plus declared `[targets.<name>]` names.
+Repeat the flag to measure several in turn; a name no target answers to is a
+setup error (exit 2) — never a silent whole-workspace run. `--list-targets`
+prints the names.
 
 ## Targets
 
@@ -315,11 +280,9 @@ files.
 - **standalone crate** — a top-level crate directory excluded from the workspace;
 - **declared** — any `[targets.<name>]` section in `.mido.toml`.
 
-With the default `auto` target, the ladder measures the narrowest target that
-covers every changed file a target owns. A diff spread over several targets is
-not guessed at — name the targets or pass `--all`. A diff no target owns — docs
-that live outside every crate — measures nothing and exits 2, with the changed
-files listed so the reason is visible.
+The banner and the report name the target and the files it measured. A
+standalone crate is its own target: the workspace roll-up never takes its files,
+and its gate commands do not inherit the root `[gate]` sections.
 
 ## Configuration
 
@@ -358,12 +321,11 @@ timeout_secs = 900
 
 [coverage]
 command          = ["cargo", "llvm-cov", "--all-features", "--lcov", "--output-path", "lcov.info"]
-changed_file_min = 80   # percent line coverage for changed files with new logic
+coverage_min     = 80   # percent total line coverage of the measured target
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
 command       = ["cargo", "mutants", "-j2"]
-scope         = "changed"      # "changed" | "all" | a literal path
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 
@@ -371,8 +333,7 @@ kill_rate_min = 70             # percent of mutants killed
 max_attempts_per_gate = 3      # distinct hypotheses the report allows per gate
 
 [targets.frontend]             # optional per-target overrides
-path   = "frontend"            # directory holding the crate
-scope  = ["frontend/"]         # changed-file prefixes this target owns
+path     = "frontend"          # directory holding the crate
 manifest = "frontend/Cargo.toml"
 ```
 
@@ -404,7 +365,7 @@ Notes:
   `[profile.mutants]` inheriting `test` with `debug = "none"` in `Cargo.toml`
   and a `.cargo/mutants.toml` with `test_tool = "nextest"` and
   `profile = "mutants"`, with `-j2` on the command: the mutants run two at a
-  time. Every timed run is a fresh sweep of the changed lines — the gate never
+  time. Every timed run is a fresh sweep of the package — the gate never
   reuses a previous run's kills. When a sweep is slow, cargo-mutants'
   performance guide applies directly: <https://mutants.rs/performance.html>.
 
@@ -421,7 +382,6 @@ handed to the next attempt:
 │ target   workspace (./) │
 │ revision febf29d1       │
 │ dirty    b1ab9f36       │
-│ base     origin/master  │
 │ failing  1 of 1 gates   │
 ╰─────────────────────────╯
 
@@ -465,7 +425,7 @@ cargo test --all-features
 ```
 
 `mido` is verified with its own ladder: this repo carries a `.mido.toml`
-and the six gates are run against the diff before handoff.
+and the six gates are run against the workspace before handoff.
 
 ## Layout
 
@@ -476,7 +436,7 @@ and the six gates are run against the diff before handoff.
 | `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
 | `src/lang/` | language modules: the rust module's embedded defaults, parsers, targets and workspace aid |
 | `src/session.rs` | one run: what is measured, in what order, what is printed (`session/{setup,output}.rs`) |
-| `src/targets.rs` | target scoping, path lists and diff ownership (`targets/paths.rs`) |
+| `src/targets.rs` | target scoping and the measured file set |
 | `src/config/` | `.mido.toml` loading, validation and defaults |
 | `src/gates/` | the six gates and their reporting |
 | `src/report.rs` | verdicts, gate lines, panels, failure report, markdown report (`report/{panel,views,markdown}.rs`) |
