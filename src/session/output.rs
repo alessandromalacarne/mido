@@ -6,7 +6,7 @@ use crate::report::{
     ReportContext,
 };
 use crate::style::Style;
-use crate::targets::{scope_changed, Target};
+use crate::targets::Target;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -58,9 +58,13 @@ fn target_kind(target: &Target) -> &'static str {
     }
 }
 
-pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult]) -> String {
-    let changed = scope_changed(&session.changed, target);
-    let source_count = changed
+pub fn markdown_report(
+    session: &Session,
+    target: &Target,
+    files: &[String],
+    results: &[GateResult],
+) -> String {
+    let source_count = files
         .iter()
         .filter(|path| session.lang.is_source(path))
         .count();
@@ -68,11 +72,9 @@ pub fn markdown_report(session: &Session, target: &Target, results: &[GateResult
         results,
         &ReportContext {
             target,
-            scope: session.scope,
-            base: &session.base,
             revision: &session.revision,
             dirty: &session.dirty,
-            changed: &changed,
+            files,
             source_label: session.lang.source_label(),
             source_count,
         },
@@ -137,35 +139,24 @@ fn verdict_json(
 pub(super) fn target_banner(
     session: &Session,
     target: &Target,
-    scoped: &[String],
+    files: &[String],
     style: Style,
 ) -> String {
-    let source_count = scoped
+    let source_count = files
         .iter()
         .filter(|path| session.lang.is_source(path))
         .count();
     render_banner(
         target,
         &BannerContext {
-            scope: session.scope,
-            base: &session.base,
             revision: &session.revision,
             dirty: &session.dirty,
-            changed: scoped,
-            selected_how: &session.selection,
+            files,
             source_label: session.lang.source_label(),
             source_count,
         },
         style,
     )
-}
-
-/// A target that owns none of the diff is skipped with a note, never silently.
-pub(super) fn skip_note(target: &Target, style: Style) -> String {
-    style.dim(&format!(
-        "no changed file belongs to {} — skipping.",
-        target.label()
-    ))
 }
 
 pub fn write_report(

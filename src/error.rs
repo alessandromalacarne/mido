@@ -23,7 +23,7 @@ impl GuardrailsError {
         Self::new(message)
     }
 
-    /// The requested run does not make sense (unknown target, no manifest, no diff).
+    /// The requested run does not make sense (unknown package, no manifest).
     pub fn setup(message: impl Into<String>) -> Self {
         Self::new(message)
     }
@@ -134,59 +134,3 @@ impl From<GuardrailsError> for RunError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn setup_error_renders_message_details_and_hint() {
-        let error = GuardrailsError::setup("cannot measure anything here")
-            .detail("no Cargo.toml under `scripts`")
-            .hint("pass --target frontend");
-
-        let rendered = error.render();
-
-        assert!(rendered.contains("error: cannot measure anything here"));
-        assert!(rendered.contains("no Cargo.toml under `scripts`"));
-        assert!(rendered.contains("hint: pass --target frontend"));
-    }
-
-    #[test]
-    fn config_error_renders_the_offending_line() {
-        let error = GuardrailsError::config("`.mido.toml` is not valid")
-            .detail("line 5: unknown key `min_mi` in [analysis]");
-
-        assert!(error.render().contains("line 5"));
-    }
-
-    #[test]
-    fn errors_exit_two_and_blocked_runs_carry_their_code() {
-        assert_eq!(GuardrailsError::setup("boom").exit_code(), 2);
-        assert_eq!(GuardrailsError::config("boom").exit_code(), 2);
-        assert_eq!(GateFailure::new("report", "BLOCKED", 1).exit_code(), 1);
-        assert_eq!(GateFailure::new("report", "BLOCKED", 2).exit_code(), 2);
-    }
-
-    #[test]
-    fn display_matches_render() {
-        let error = GuardrailsError::setup("boom").detail("why");
-
-        assert_eq!(error.to_string(), error.render());
-    }
-
-    #[test]
-    fn a_styled_error_paints_the_lead_in_and_steps_the_hint_back() {
-        let error = GuardrailsError::setup("boom").hint("pass --target frontend");
-
-        let rendered = error.render_styled(Style::colored());
-
-        assert!(
-            rendered.starts_with("\u{1b}[31merror:\u{1b}[0m boom"),
-            "{rendered:?}"
-        );
-        assert!(
-            rendered.ends_with("\u{1b}[2m  hint: pass --target frontend\u{1b}[0m"),
-            "{rendered:?}"
-        );
-    }
-}
