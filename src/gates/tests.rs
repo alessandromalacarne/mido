@@ -11,7 +11,7 @@ fn gate_run_with<'a>(
     repo: &'a MiniRepo,
     config: &'a Config,
     gates: &'a [Gate],
-    changed: &'a [String],
+    files: &'a [String],
 ) -> GateRun<'a> {
     let target = Box::leak(Box::new(Target::workspace_target("Cargo.toml")));
     GateRun {
@@ -19,8 +19,7 @@ fn gate_run_with<'a>(
         target,
         config,
         lang: Lang::Rust,
-        scope: Scope::Diff,
-        changed,
+        files,
         gates,
         scratch: &repo.root,
         baseline_lcov: None,
@@ -62,12 +61,12 @@ fn every_gate_reports_a_line_of_its_own() {
         ("cargo test", 0, "test result: ok. 1 passed; 0 failed\n"),
     ])
     .tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
+    let files = vec!["src/foo.rs".to_string()];
     let run = gate_run_with(
         &repo,
         &config,
         &[Gate::Syntax, Gate::Size, Gate::Analysis, Gate::Tests],
-        &changed,
+        &files,
     );
     let mut out = Vec::new();
 
@@ -85,8 +84,8 @@ fn a_running_gate_announces_itself_on_a_terminal() {
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
         .tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Tests, Gate::Syntax], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Tests, Gate::Syntax], &files);
     let mut out = Vec::new();
 
     run_gates(&runner, &run, &mut out, Style::colored());
@@ -112,8 +111,8 @@ fn a_piped_run_never_writes_a_live_line() {
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
         .tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Tests], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Tests], &files);
     let mut out = Vec::new();
 
     run_gates(&runner, &run, &mut out, Style::plain());
@@ -130,8 +129,8 @@ fn a_detail_that_echoes_the_summary_is_not_printed_twice() {
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
         .tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Tests], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Tests], &files);
     let mut out = Vec::new();
 
     run_gates(&runner, &run, &mut out, Style::plain());
@@ -161,8 +160,8 @@ fn the_size_gate_gets_the_function_metrics_it_judges() {
         ("tokei", 0, &tokei.to_string()),
     ])
     .tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Size], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Size], &files);
 
     let results = run_gates(&runner, &run, &mut Vec::new(), Style::plain());
 
@@ -176,8 +175,8 @@ fn the_coverage_gate_is_dispatched_under_its_own_name() {
     let repo = repo();
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::with(&[("llvm-cov", 101, "no coverage tool here")]).tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Coverage], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Coverage], &files);
 
     let results = run_gates(&runner, &run, &mut Vec::new(), Style::plain());
 
@@ -191,8 +190,8 @@ fn the_gates_run_in_the_order_they_were_asked_for() {
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::with(&[("cargo test", 0, "test result: ok. 1 passed; 0 failed\n")])
         .tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Tests, Gate::Syntax], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Tests, Gate::Syntax], &files);
 
     let results = run_gates(&runner, &run, &mut Vec::new(), Style::plain());
 
@@ -201,17 +200,17 @@ fn the_gates_run_in_the_order_they_were_asked_for() {
 }
 
 #[test]
-fn a_deleted_rust_file_is_not_measured() {
+fn a_file_that_is_not_there_is_not_measured() {
     let repo = repo();
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::default().tool("cargo");
-    let changed = vec!["src/gone.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Size], &changed);
+    let files = vec!["src/gone.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Size], &files);
 
     let results = run_gates(&runner, &run, &mut Vec::new(), Style::plain());
 
     assert_eq!(results[0].status, crate::report::PASS);
-    assert_eq!(results[0].summary, "no rust changes");
+    assert_eq!(results[0].summary, "no rust source files");
     assert!(!runner.called_with("tokei"));
 }
 
@@ -223,8 +222,8 @@ fn units_are_only_measured_for_the_gates_that_need_them() {
     std::fs::write(repo.root.join("src/foo.rs"), "").expect("file");
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
     let runner = FakeRunner::with(&[("rust-code-analysis-cli", 1, "")]).tool("cargo");
-    let changed = vec!["src/foo.rs".to_string()];
-    let run = gate_run_with(&repo, &config, &[Gate::Syntax], &changed);
+    let files = vec!["src/foo.rs".to_string()];
+    let run = gate_run_with(&repo, &config, &[Gate::Syntax], &files);
 
     run_gates(&runner, &run, &mut Vec::new(), Style::plain());
 

@@ -135,3 +135,178 @@ fn unknown_package_error(spec: &str, targets: &BTreeMap<String, Target>) -> Guar
         .hint("pass a package name, or run without -p to measure the whole workspace")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lang::Lang;
+    use crate::test_support::MiniRepo;
+
+    fn targets(repo: &MiniRepo) -> BTreeMap<String, Target> {
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+        detect_targets(&repo.root, &config)
+    }
+
+    fn repo(config: Option<&str>) -> MiniRepo {
+        MiniRepo::build(config)
+    }
+
+    #[test]
+    fn workspace_members_collapse_into_one_target() {
+        let repo = repo(None);
+
+        let detected = targets(&repo);
+        let workspace = detected.get("workspace").expect("workspace target");
+
+        assert_eq!(workspace.path, "");
+        assert_eq!(workspace.package, None);
+        assert!(workspace.workspace_member);
+    }
+
+    #[test]
+    fn excluded_crates_become_their_own_targets() {
+        let repo = repo(None);
+
+        let detected = targets(&repo);
+
+        assert_eq!(detected.get("frontend").expect("frontend").path, "frontend");
+        assert!(!detected.get("frontend").expect("frontend").workspace_member);
+        assert_eq!(
+            detected
+                .get("frontend")
+                .expect("frontend")
+                .package
+                .as_deref(),
+            Some("frontend")
+        );
+        assert!(detected.contains_key("desktop"));
+    }
+
+    #[test]
+    fn member_targets_carry_their_package_names() {
+        let repo = repo(None);
+
+        let detected = targets(&repo);
+
+        assert_eq!(
+            detected.get("cli").expect("cli").package.as_deref(),
+            Some("cli")
+        );
+        assert_eq!(
+            detected.get("api").expect("api").package.as_deref(),
+            Some("api")
+        );
+    }
+
+    #[test]
+    fn a_package_name_that_differs_from_the_directory_still_resolves() {
+        let repo = repo(None);
+        std::fs::write(
+            repo.root.join("cli/Cargo.toml"),
+            "[package]\nname = \"cli-tool\"\n",
+        )
+        .expect("manifest");
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+
+        let target = resolve_package(&repo.root, &config, "cli-tool").expect("resolves");
+
+        assert_eq!(target.name, "cli");
+        assert_eq!(target.path, "cli");
+    }
+
+    #[test]
+    fn explicit_target_section_extends_the_detected_set() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [targets.tui]
+            path = \"cli/src/tui\"
+        ",
+        ));
+
+        assert_eq!(targets(&repo).get("tui").expect("tui").path, "cli/src/tui");
+    }
+
+    #[test]
+    fn a_target_section_defaults_its_path_to_its_name() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [targets.api]
+        ",
+        ));
+
+        assert_eq!(targets(&repo).get("api").expect("api").path, "api");
+    }
+
+    #[test]
+    fn a_declared_target_names_the_manifest_under_its_path() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [targets.tui]
+            path = \"cli\"
+        ",
+        ));
+
+        assert_eq!(
+            targets(&repo).get("tui").expect("tui").manifest.as_deref(),
+            Some("cli/Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn package_resolution_accepts_a_declared_name() {
+        let repo = repo(Some(
+            "
+            version = 1
+
+            [targets.tui]
+            path = \"cli\"
+        ",
+        ));
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+
+        let target = resolve_package(&repo.root, &config, "tui").expect("resolves");
+
+        assert_eq!(target.path, "cli");
+    }
+
+    #[test]
+    fn an_unknown_package_is_a_setup_error_listing_the_known_names() {
+        let repo = repo(None);
+        let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+
+        let message = resolve_package(&repo.root, &config, "nope")
+            .expect_err("unknown package")
+            .render();
+
+        assert!(message.contains("package `nope` not found"), "{message}");
+        assert!(message.contains("frontend"), "{message}");
+        assert!(message.contains("workspace"), "{message}");
+    }
+
+    #[test]
+    fn workspace_layout_reads_members_and_excludes() {
+        let repo = repo(None);
+
+        let (members, excluded) = workspace_layout(&repo.root);
+
+        assert_eq!(members, vec!["cli", "api", "lib"]);
+        assert_eq!(excluded, vec!["frontend", "desktop"]);
+    }
+
+    #[test]
+    fn targets_without_a_workspace_manifest_have_no_manifest() {
+        let repo = repo(Some("version = 1\n"));
+        std::fs::remove_file(repo.root.join("Cargo.toml")).expect("no root manifest");
+
+        let detected = targets(&repo);
+        let workspace = detected.get("workspace").expect("workspace target");
+
+        assert_eq!(workspace.manifest, None);
+        assert_eq!(workspace.package, None);
+    }
+}

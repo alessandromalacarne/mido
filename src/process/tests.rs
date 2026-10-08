@@ -92,21 +92,6 @@ fn git_returns_stdout_only_on_success() {
 }
 
 #[test]
-fn changed_files_merges_and_dedupes_every_source() {
-    let runner = FakeRunner::with(&[
-        ("merge-base", 0, "base\n"),
-        ("diff --name-only base", 0, "a.rs\nb.rs\n"),
-        ("--cached", 0, "b.rs\n"),
-        ("--others", 0, "c.rs\n"),
-    ]);
-
-    assert_eq!(
-        changed_files(&runner, Path::new("/repo"), "origin/mvp"),
-        vec!["a.rs", "b.rs", "c.rs"]
-    );
-}
-
-#[test]
 fn all_files_merges_tracked_and_untracked_files() {
     let runner = FakeRunner::with(&[
         ("--others", 0, "c.rs\n"),
@@ -117,20 +102,6 @@ fn all_files_merges_tracked_and_untracked_files() {
         all_files(&runner, Path::new("/repo")),
         vec!["a.rs", "b.rs", "c.rs"]
     );
-}
-
-#[test]
-fn pick_base_prefers_the_first_known_remote() {
-    let runner = FakeRunner::with(&[("origin/develop", 0, "deadbeef\n"), ("origin/mvp", 128, "")]);
-
-    assert_eq!(pick_base(&runner, Path::new("/repo")), "origin/develop");
-
-    let runner = FakeRunner::with(&[
-        ("origin/mvp", 128, ""),
-        ("origin/develop", 128, ""),
-        ("origin/master", 128, ""),
-    ]);
-    assert_eq!(pick_base(&runner, Path::new("/repo")), "HEAD");
 }
 
 #[test]

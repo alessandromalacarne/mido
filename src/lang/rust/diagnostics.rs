@@ -163,3 +163,130 @@ fn diagnostic_message(lines: &[&str], index: usize) -> String {
     String::new()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formatting_differences_are_the_problem() {
+        let outcome = syntax_outcome(
+            "format",
+            "cargo fmt --check",
+            "Diff in src/foo.rs:3:\nDiff in src/bar.rs:1:\n",
+            1,
+        );
+
+        assert_eq!(outcome.problems.len(), 2);
+        assert!(outcome.problems[0].contains("src/bar.rs"));
+        assert!(outcome.details[0].contains("2 file(s) with diffs -> src/bar.rs, src/foo.rs"));
+    }
+
+    #[test]
+    fn a_clean_format_pass_has_nothing_to_report() {
+        let outcome = syntax_outcome("format", "cargo fmt --check", "", 0);
+
+        assert!(outcome.problems.is_empty());
+        assert!(outcome.details[0].contains("0 file(s) with diffs"));
+    }
+
+    #[test]
+    fn diagnostics_report_the_message_above_the_location() {
+        let problems = extract_diagnostics("error: mismatched types\n  --> src/foo.rs:12:5\n");
+
+        assert_eq!(problems, vec!["src/foo.rs:12:5 error: mismatched types"]);
+    }
+
+    #[test]
+    fn a_diagnostic_without_a_severity_line_keeps_just_its_location() {
+        let problems =
+            extract_diagnostics("error[E0308]: mismatched types\n  --> src/foo.rs:12:5\n");
+
+        assert_eq!(problems, vec!["src/foo.rs:12:5"]);
+    }
+
+    #[test]
+    fn every_reported_diagnostic_is_a_problem() {
+        let outcome = syntax_outcome(
+            "lint",
+            "cargo clippy",
+            "warning: unused\n  --> src/foo.rs:1:1\nwarning: old\n  --> src/old.rs:2:2\n",
+            1,
+        );
+
+        assert_eq!(outcome.problems.len(), 2);
+        assert!(outcome.details[0].contains("2 diagnostic(s) -> src/foo.rs, src/old.rs"));
+    }
+
+    #[test]
+    fn a_failing_step_with_no_diagnostics_is_not_a_pass() {
+        let outcome = syntax_outcome(
+            "lint",
+            "cargo clippy",
+            "error: could not compile `mido`\n",
+            101,
+        );
+
+        assert_eq!(outcome.problems.len(), 1);
+        assert!(outcome.problems[0].contains("exited 101"));
+        assert!(outcome
+            .details
+            .iter()
+            .any(|line| line.starts_with("lint: error:")));
+    }
+
+    #[test]
+    fn a_passing_step_with_diagnostics_still_reports_them() {
+        let outcome = syntax_outcome(
+            "typecheck",
+            "cargo check",
+            "warning: pre-existing\n  --> src/old.rs:2:2\n",
+            0,
+        );
+
+        assert_eq!(
+            outcome.problems,
+            vec!["src/old.rs:2:2 warning: pre-existing"]
+        );
+    }
+
+    #[test]
+    fn the_same_diagnostic_from_two_tools_is_kept_once() {
+        let problems = dedupe_problems(&[
+            "src/foo.rs:9:9 error: unused variable: `x`".to_string(),
+            "src/foo.rs:9:9 warning: unused variable: `x`".to_string(),
+        ]);
+
+        assert_eq!(problems.len(), 1);
+    }
+
+    #[test]
+    fn different_diagnostics_are_both_kept() {
+        let problems = dedupe_problems(&[
+            "src/foo.rs:9:9 error: unused variable: `x`".to_string(),
+            "src/foo.rs:4:1 warning: unused import: `std::io`".to_string(),
+        ]);
+
+        assert_eq!(problems.len(), 2);
+        assert_eq!(problems[0], "src/foo.rs:9:9 error: unused variable: `x`");
+    }
+
+    #[test]
+    fn the_last_report_of_a_duplicate_wins() {
+        let problems = dedupe_problems(&[
+            "src/foo.rs:9:9 error: unused variable: `x`".to_string(),
+            "src/foo.rs:9:9 warning: unused variable: `x`".to_string(),
+        ]);
+
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0], "src/foo.rs:9:9 warning: unused variable: `x`");
+    }
+
+    #[test]
+    fn a_key_folds_the_severity_but_keeps_the_message() {
+        assert_eq!(
+            diagnostic_key("src/foo.rs:9:9 warning: unused variable: `x`"),
+            "src/foo.rs:9:9 unused variable: `x`"
+        );
+        assert_eq!(diagnostic_key("bare"), "bare ");
+    }
+}

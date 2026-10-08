@@ -143,7 +143,11 @@ fn a_setup_error_comes_back_as_a_tool_error() {
     let root = repo.path().to_str().expect("utf8").to_string();
     let mut server = Server::start(repo.path());
 
-    let response = server.call(4, "run_ladder", json!({ "repo": root, "paths": ["docs"] }));
+    let response = server.call(
+        4,
+        "run_ladder",
+        json!({ "repo": root, "packages": ["nope"] }),
+    );
     let result = &response["result"];
 
     assert_eq!(result["isError"], true);
@@ -152,9 +156,5 @@ fn a_setup_error_comes_back_as_a_tool_error() {
         "{}",
         text(&response)
     );
-    assert!(
-        text(&response).contains("does not exist"),
-        "{}",
-        text(&response)
-    );
+    assert!(text(&response).contains("not found"), "{}", text(&response));
 }

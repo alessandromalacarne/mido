@@ -53,14 +53,17 @@ fn a_configured_command_runs_first() {
 }
 
 #[test]
-fn clippy_diagnostic_in_a_changed_file_fails_the_syntax_gate() {
+fn every_reported_diagnostic_fails_the_gate() {
     let repo = repo();
-    let clippy = "warning: unused variable: `x`\n  --> src/components/foo.rs:12:5\nwarning: pre-existing, untouched\n  --> src/legacy/old.rs:3:1\n";
+    let clippy = "warning: unused variable: `x`\n  --> src/components/foo.rs:12:5\nwarning: pre-existing\n  --> src/legacy/old.rs:3:1\n";
     let runner =
         FakeRunner::with(&[("clippy", 1, clippy), ("fmt", 0, ""), ("check", 0, "")]).tool("cargo");
+    let files = vec![
+        "src/components/foo.rs".to_string(),
+        "src/legacy/old.rs".to_string(),
+    ];
 
-    let changed = vec!["src/components/foo.rs".to_string()];
-    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
+    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
 
     assert_eq!(result.name, "syntax");
     assert_eq!(result.status, FAIL);
@@ -68,6 +71,14 @@ fn clippy_diagnostic_in_a_changed_file_fails_the_syntax_gate() {
         .details
         .iter()
         .any(|line| line.contains("src/components/foo.rs:12:5")));
+    assert!(
+        result
+            .details
+            .iter()
+            .any(|line| line.contains("src/legacy/old.rs:3:1")),
+        "no diagnostic is out of scope: {:?}",
+        result.details
+    );
 }
 
 #[test]
@@ -77,9 +88,9 @@ fn the_same_diagnostic_from_clippy_and_check_is_counted_once() {
     let check = "warning: unused variable: `x`\n  --> src/foo.rs:9:9\n";
     let runner = FakeRunner::with(&[("clippy", 1, clippy), ("fmt", 0, ""), ("check", 1, check)])
         .tool("cargo");
+    let files = vec!["src/foo.rs".to_string()];
 
-    let changed = vec!["src/foo.rs".to_string()];
-    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
+    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
 
     assert_eq!(result.status, FAIL);
     assert_eq!(
@@ -93,17 +104,16 @@ fn the_same_diagnostic_from_clippy_and_check_is_counted_once() {
 }
 
 #[test]
-fn crate_wide_debt_without_a_changed_file_passes_but_says_so() {
+fn a_clean_run_reports_clean() {
     let repo = repo();
-    let clippy = "warning: pre-existing\n  --> src/legacy/old.rs:3:1\n";
     let runner =
-        FakeRunner::with(&[("clippy", 1, clippy), ("fmt", 0, ""), ("check", 0, "")]).tool("cargo");
+        FakeRunner::with(&[("fmt", 0, ""), ("check", 0, ""), ("clippy", 0, "")]).tool("cargo");
+    let files = vec!["src/foo.rs".to_string()];
 
-    let changed = vec!["lib/src/lib.rs".to_string()];
-    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
+    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
 
     assert_eq!(result.status, PASS);
-    assert!(result.summary.contains("pre-existing"));
+    assert_eq!(result.summary, "clean");
 }
 
 #[test]
@@ -119,9 +129,9 @@ fn unattributable_linter_output_is_not_a_pass() {
         ("check", 0, ""),
     ])
     .tool("cargo");
+    let files = vec!["src/foo.rs".to_string()];
 
-    let changed = vec!["src/foo.rs".to_string()];
-    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &changed));
+    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
 
     assert_eq!(result.status, FAIL);
     assert!(result.details.join(" ").contains("cannot attribute"));

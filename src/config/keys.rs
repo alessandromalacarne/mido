@@ -71,3 +71,47 @@ pub fn joined(keys: impl IntoIterator<Item = &'static str>) -> String {
     keys.into_iter().collect::<Vec<_>>().join(", ")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_gate_names_its_own_keys() {
+        for gate in GATES {
+            assert!(!gate_keys(gate).is_empty(), "{gate} has keys");
+            assert!(gate_keys(gate).contains(&"enabled"));
+        }
+    }
+
+    #[test]
+    fn command_keys_are_gate_keys() {
+        for gate in GATES {
+            for key in command_keys(gate) {
+                assert!(gate_keys(gate).contains(key), "{gate} accepts {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn top_level_keys_are_the_sections_plus_the_scalars() {
+        let keys = top_level_keys();
+
+        assert!(keys.contains("targets"));
+        assert!(keys.contains("version"));
+        assert!(keys.contains("syntax"));
+        assert!(keys.contains("analysis"));
+        assert!(keys.contains("failure"));
+        assert!(!keys.contains("max_attempts_per_gate"));
+        assert!(!keys.contains("min_mi"));
+    }
+
+    #[test]
+    fn target_keys_accept_the_layout_keys_and_the_gates() {
+        let keys = target_keys();
+
+        assert!(keys.contains("path"));
+        assert!(keys.contains("manifest"));
+        assert!(keys.contains("tests"));
+        assert!(!keys.contains("scope"), "the diff-scope key is gone");
+    }
+}

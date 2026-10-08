@@ -83,3 +83,47 @@ pub fn percent(hit: i64, found: i64) -> f64 {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lcov_counts_each_source_file() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let report = directory.path().join("lcov.info");
+        std::fs::write(
+            &report,
+            "SF:/repo/lib/src/foo.rs\nLF:10\nLH:2\nend_of_record\nSF:/repo/lib/src/bar.rs\nLF:4\nLH:4\nend_of_record\n",
+        )
+        .expect("report");
+
+        let files = lcov_files(&report);
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(
+            files["/repo/lib/src/foo.rs"],
+            LcovStat {
+                lines_found: 10,
+                lines_hit: 2
+            }
+        );
+        assert_eq!(
+            files["/repo/lib/src/bar.rs"],
+            LcovStat {
+                lines_found: 4,
+                lines_hit: 4
+            }
+        );
+    }
+
+    #[test]
+    fn a_missing_report_measures_nothing() {
+        assert!(lcov_files(Path::new("/nonexistent/lcov.info")).is_empty());
+    }
+
+    #[test]
+    fn percent_handles_the_empty_denominator() {
+        assert_eq!(percent(0, 0), 0.0);
+        assert_eq!(percent(2, 10), 20.0);
+    }
+}

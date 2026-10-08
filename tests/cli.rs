@@ -30,6 +30,19 @@ fn write(path: PathBuf, body: &str) {
     std::fs::write(path, body).expect("file written");
 }
 
+/// The fixture's member crate with two source files, committed.
+fn lib_sources(repo: &tempfile::TempDir) {
+    write(
+        repo.path().join("lib/src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+    );
+    write(
+        repo.path().join("lib/src/other.rs"),
+        "pub fn other() -> i32 {\n    1\n}\n",
+    );
+    commit_all(repo.path());
+}
+
 fn run(root: &Path, args: &[&str]) -> Output {
     let mut command = Command::new(binary());
     command.arg("--repo").arg(root);
@@ -41,18 +54,28 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).to_string()
 }
 
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).to_string()
+}
+
 #[test]
-fn help_names_the_verdict_vocabulary() {
+fn help_names_the_selection_surface_and_the_verdict_vocabulary() {
     let output = Command::new(binary())
         .arg("--help")
         .output()
         .expect("the binary runs");
 
     assert!(output.status.success());
-    assert!(stdout(&output).contains("SHIP-READY"));
-    assert!(stdout(&output).contains("--path"));
-    assert!(stdout(&output).contains("--lang"));
-    assert!(stdout(&output).contains("--no-diff"));
+    let help = stdout(&output);
+    assert!(help.contains("SHIP-READY"), "{help}");
+    assert!(help.contains("--package"), "{help}");
+    assert!(help.contains("--lang"), "{help}");
+    assert!(!help.contains("--path"), "{help}");
+    assert!(!help.contains("--no-diff"), "{help}");
+    assert!(
+        !help.contains("--base <") && !help.contains("--base="),
+        "`--base` is gone (only `--baseline-lcov` stays): {help}"
+    );
 }
 
 #[test]
@@ -66,7 +89,7 @@ fn the_language_module_is_inferred_from_the_environment() {
 
     let bare = tempfile::tempdir().expect("temp dir");
     let output = run(bare.path(), &["--list-targets"]);
-    let errors = String::from_utf8_lossy(&output.stderr).to_string();
+    let errors = stderr(&output);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(
@@ -108,100 +131,57 @@ fn the_binary_lists_the_detected_targets() {
 }
 
 #[test]
-fn the_binary_measures_explicit_paths_without_a_diff() {
+fn the_binary_measures_the_workspace_by_default() {
     let repo = mini_repo();
-    write(
-        repo.path().join("lib/src/lib.rs"),
-        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
-    );
-    commit_all(repo.path());
-    // A change the diff would report, and the run must not.
-    write(
-        repo.path().join("lib/src/other.rs"),
-        "pub fn other() -> i32 {\n    1\n}\n",
-    );
+    lib_sources(&repo);
 
-    let output = run(
-        repo.path(),
-        &["--path", "lib/src/lib.rs", "--gate", "tests"],
-    );
+    let output = run(repo.path(), &["--gate", "tests"]);
     let printed = stdout(&output);
 
     assert_eq!(output.status.code(), Some(0), "{printed}");
-    assert!(printed.contains("scope    explicit paths"), "{printed}");
-    assert!(printed.contains("  src/lib.rs"), "{printed}");
-    assert!(!printed.contains("src/other.rs"), "{printed}");
+    assert!(printed.contains("workspace (./)"), "{printed}");
+    assert!(printed.contains("measured 4 files (2 rust)"), "{printed}");
+    assert!(printed.contains("  lib/src/lib.rs"), "{printed}");
+    assert!(
+        !printed.contains("frontend"),
+        "a standalone crate's files belong to it, not to the workspace: {printed}"
+    );
 }
 
 #[test]
-fn the_binary_measures_the_whole_target_without_a_diff() {
+fn the_binary_measures_a_named_package_whole() {
     let repo = mini_repo();
-    write(
-        repo.path().join("lib/src/lib.rs"),
-        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
-    );
-    write(
-        repo.path().join("lib/src/other.rs"),
-        "pub fn other() -> i32 {\n    1\n}\n",
-    );
-    commit_all(repo.path());
-    // A change the diff would report; the whole run measures every file anyway.
-    write(
-        repo.path().join("lib/src/other.rs"),
-        "pub fn other() -> i32 {\n    2\n}\n",
-    );
+    lib_sources(&repo);
 
-    let output = run(repo.path(), &["--no-diff", "lib", "--gate", "tests"]);
+    let output = run(repo.path(), &["-p", "lib", "--gate", "tests"]);
     let printed = stdout(&output);
 
     assert_eq!(output.status.code(), Some(0), "{printed}");
-    assert!(
-        printed.contains("scope    whole target (no diff)"),
-        "{printed}"
-    );
+    assert!(printed.contains("lib (lib/)"), "{printed}");
     assert!(printed.contains("measured 3 files (2 rust)"), "{printed}");
     assert!(printed.contains("  src/lib.rs"), "{printed}");
     assert!(printed.contains("  src/other.rs"), "{printed}");
 }
 
 #[test]
-fn a_no_diff_run_can_measure_one_file() {
+fn an_unknown_package_is_a_setup_error() {
     let repo = mini_repo();
-    write(
-        repo.path().join("lib/src/lib.rs"),
-        "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
-    );
-    write(
-        repo.path().join("lib/src/other.rs"),
-        "pub fn other() -> i32 {\n    1\n}\n",
-    );
-    commit_all(repo.path());
 
-    let output = run(
-        repo.path(),
-        &["--no-diff", "--path", "lib/src/lib.rs", "--gate", "tests"],
-    );
-    let printed = stdout(&output);
+    let output = run(repo.path(), &["-p", "nope"]);
+    let errors = stderr(&output);
 
-    assert_eq!(output.status.code(), Some(0), "{printed}");
-    assert!(printed.contains("scope    explicit paths"), "{printed}");
-    assert!(printed.contains("  src/lib.rs"), "{printed}");
-    assert!(!printed.contains("src/other.rs"), "{printed}");
+    assert_eq!(output.status.code(), Some(2), "{errors}");
+    assert!(errors.contains("package `nope` not found"), "{errors}");
 }
 
 #[test]
-fn the_binary_reports_paths_that_hold_no_file() {
+fn the_removed_scope_flags_are_rejected() {
     let repo = mini_repo();
-    std::fs::create_dir_all(repo.path().join("docs")).expect("docs dir");
 
-    let output = run(repo.path(), &["--path", "docs"]);
-    let printed = stdout(&output);
+    let output = run(repo.path(), &["--path", "lib"]);
 
-    assert_eq!(output.status.code(), Some(2), "{printed}");
-    assert!(
-        printed.contains("the paths given hold no file"),
-        "{printed}"
-    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!stderr(&output).is_empty());
 }
 
 fn commit_all(root: &Path) {

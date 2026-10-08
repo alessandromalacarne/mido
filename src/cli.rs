@@ -123,3 +123,70 @@ pub fn main_with(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_packages_the_whole_workspace_is_measured() {
+        assert!(parse_from(&[]).packages.is_empty());
+    }
+
+    #[test]
+    fn the_package_flag_is_repeatable_and_has_a_short_form() {
+        assert_eq!(
+            parse_from(&["-p", "lib", "--package", "api"]).packages,
+            vec!["lib", "api"]
+        );
+    }
+
+    #[test]
+    fn the_language_flag_selects_a_module() {
+        assert_eq!(parse_from(&["--lang", "rust"]).lang, Some(LangArg::Rust));
+    }
+
+    #[test]
+    fn an_unknown_language_is_never_silently_accepted() {
+        let rejected = try_parse_from(&["--lang", "python"]);
+
+        assert!(rejected.is_err(), "an unknown module is not a module");
+        assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
+    }
+
+    #[test]
+    fn every_gate_name_is_selectable() {
+        let args = parse_from(&["--gate", "coverage"]);
+
+        assert_eq!(args.gates, vec![Gate::Coverage]);
+    }
+
+    #[test]
+    fn a_positional_target_is_not_a_target_anymore() {
+        let rejected = try_parse_from(&["frontend"]);
+
+        assert!(rejected.is_err(), "a bare positional is a usage error");
+        assert_eq!(rejected.expect_err("rejected").exit_code(), 2);
+    }
+
+    #[test]
+    fn the_removed_scope_flags_are_not_accepted() {
+        for flag in ["--base", "--path", "--no-diff", "--all"] {
+            let rejected = try_parse_from(&[flag, "x"]);
+            assert!(rejected.is_err(), "`{flag}` is gone");
+        }
+    }
+
+    #[test]
+    fn flags_argv() {
+        let args = parse_from(&["--repo", "/tmp/x", "-p", "frontend", "--json"]);
+
+        assert_eq!(args.repo, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(args.packages, vec!["frontend"]);
+        assert!(args.json);
+    }
+
+    #[test]
+    fn the_mcp_subcommand_is_recognized() {
+        assert_eq!(parse_from(&["mcp"]).command, Some(Command::Mcp));
+    }
+}

@@ -72,10 +72,14 @@ fn tools_list_exposes_the_ladder_and_target_discovery() {
     assert_eq!(run["json"]["default"], true);
     assert_eq!(run["lang"]["enum"][0], "rust");
     assert_eq!(run["gates"]["items"]["enum"][5], "mutation");
-    assert_eq!(run["target"]["default"], "auto");
+    assert_eq!(run["packages"]["items"]["type"], "string");
     assert_eq!(run["repo"]["type"], "string");
-    assert_eq!(run["no_diff"]["type"], "boolean");
-    assert_eq!(run["no_diff"]["default"], false);
+    assert_eq!(run["apply_workspace_aid"]["type"], "boolean");
+    assert_eq!(run["apply_workspace_aid"]["default"], false);
+    assert!(
+        run.get("target").is_none() && run.get("paths").is_none() && run.get("base").is_none(),
+        "the removed scope arguments are not advertised: {run}"
+    );
     assert_eq!(
         tools[0]["inputSchema"]["properties"]["repo"]["type"],
         "string"
@@ -88,8 +92,8 @@ fn run_ladder_maps_arguments_onto_the_cli() {
     let response = handle_line(
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
             "name":"run_ladder","arguments":{
-            "target":"workspace","repo":"/repo","base":"origin/main",
-            "paths":["src/a.rs","cli"],"gates":["tests","coverage"],
+            "packages":["lib","cli"],"repo":"/repo",
+            "gates":["tests","coverage"],
             "report":"out.md","json":false}}}"#,
         &stub,
     )
@@ -97,8 +101,7 @@ fn run_ladder_maps_arguments_onto_the_cli() {
 
     assert_eq!(
         stub.argv().join(" "),
-        "workspace --repo /repo --base origin/main --path src/a.rs --path cli \
-         --gate tests --gate coverage --report out.md"
+        "--repo /repo -p lib -p cli --gate tests --gate coverage --report out.md"
     );
     assert_eq!(response["result"]["isError"], true);
     let text = response["result"]["content"][0]["text"]
@@ -110,30 +113,30 @@ fn run_ladder_maps_arguments_onto_the_cli() {
 }
 
 #[test]
-fn run_ladder_defaults_to_json_and_can_run_every_target() {
+fn run_ladder_defaults_to_json_and_can_run_the_whole_workspace() {
     let stub = Stub::new(0);
     let response = handle_line(
         r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
-            "name":"run_ladder","arguments":{"all":true,"apply_workspace_aid":true}}}"#,
+            "name":"run_ladder","arguments":{"apply_workspace_aid":true}}}"#,
         &stub,
     )
     .expect("answered");
 
-    assert_eq!(stub.argv(), ["--all", "--apply-workspace-aid", "--json"]);
+    assert_eq!(stub.argv(), ["--apply-workspace-aid", "--json"]);
     assert_eq!(response["result"]["isError"], false);
 }
 
 #[test]
-fn run_ladder_carries_the_no_diff_switch_and_the_paths_it_composes_with() {
+fn run_ladder_passes_a_single_package_with_the_short_flag() {
     let stub = Stub::new(0);
     handle_line(
         r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{
-            "name":"run_ladder","arguments":{"no_diff":true,"paths":["src/a.rs"]}}}"#,
+            "name":"run_ladder","arguments":{"packages":["lib"]}}}"#,
         &stub,
     )
     .expect("answered");
 
-    assert_eq!(stub.argv(), ["--path", "src/a.rs", "--no-diff", "--json"]);
+    assert_eq!(stub.argv(), ["-p", "lib", "--json"]);
 }
 
 #[test]
@@ -249,7 +252,7 @@ fn a_null_list_argument_is_treated_as_absent() {
     let stub = Stub::new(0);
     handle_line(
         r#"{"jsonrpc":"2.0","id":16,"method":"tools/call",
-            "params":{"name":"run_ladder","arguments":{"paths":null,"gates":null}}}"#,
+            "params":{"name":"run_ladder","arguments":{"packages":null,"gates":null}}}"#,
         &stub,
     )
     .expect("answered");
@@ -399,12 +402,7 @@ fn the_system_invoker_runs_the_cli_in_process() {
 
 #[test]
 fn the_system_invoker_reports_a_usage_error_like_the_cli() {
-    let outcome = SystemInvoke.invoke(&[
-        "--path".to_string(),
-        "src".to_string(),
-        "--base".to_string(),
-        "origin/main".to_string(),
-    ]);
+    let outcome = SystemInvoke.invoke(&["frontend".to_string()]);
 
     assert_eq!(outcome.code, 2, "{}", outcome.stderr);
     assert!(!outcome.stderr.is_empty());

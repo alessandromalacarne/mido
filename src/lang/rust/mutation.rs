@@ -16,3 +16,36 @@ pub fn test_args(command: &[String]) -> Option<Vec<String>> {
     Some(command[start + 2..].to_vec())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cmd(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn a_test_command_carries_its_cargo_test_arguments() {
+        assert_eq!(
+            test_args(&cmd(&["cargo", "test", "--all-features"])),
+            Some(cmd(&["--all-features"]))
+        );
+        assert_eq!(
+            test_args(&cmd(&[
+                "nix",
+                "develop",
+                "-c",
+                "cargo",
+                "test",
+                "--target",
+                "wasm32-unknown-unknown"
+            ])),
+            Some(cmd(&["--target", "wasm32-unknown-unknown"]))
+        );
+    }
+
+    #[test]
+    fn a_command_that_names_no_cargo_test_carries_nothing() {
+        assert_eq!(test_args(&cmd(&["cargo", "nextest", "run"])), None);
+    }
+}

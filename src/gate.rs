@@ -67,3 +67,50 @@ impl Gate {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_round_trips_through_its_gate() {
+        for gate in GATES {
+            assert_eq!(Gate::from_name(gate.name()), Some(gate));
+        }
+    }
+
+    #[test]
+    fn the_ladder_runs_cheap_gates_before_expensive_ones() {
+        let names: Vec<&str> = GATES.iter().map(|gate| gate.name()).collect();
+
+        assert_eq!(
+            names,
+            vec!["syntax", "size", "analysis", "tests", "coverage", "mutation"]
+        );
+    }
+
+    #[test]
+    fn an_unknown_name_is_no_gate() {
+        assert_eq!(Gate::from_name("unknown-gate"), None);
+    }
+
+    #[test]
+    fn every_gate_has_a_fix_hint() {
+        for gate in GATES {
+            assert!(
+                !gate.fix_hints().is_empty(),
+                "{} needs a fix hint",
+                gate.name()
+            );
+        }
+    }
+
+    #[test]
+    fn the_fix_hints_say_what_they_mean() {
+        assert!(Gate::Syntax.fix_hints()[0].contains("fix the diagnostics"));
+        assert!(Gate::Size.fix_hints()[0].contains("real seam"));
+        assert!(Gate::Analysis.fix_hints()[0].contains("padding comments"));
+        assert!(Gate::Tests.fix_hints()[0].contains("never skip"));
+        assert!(Gate::Coverage.fix_hints()[0].contains("behavior tests"));
+        assert!(Gate::Mutation.fix_hints()[0].contains("equivalence justification"));
+    }
+}

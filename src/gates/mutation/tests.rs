@@ -11,6 +11,11 @@ fn repo() -> MiniRepo {
     MiniRepo::build(None)
 }
 
+/// The measured rust file every mutation run needs to reach cargo-mutants.
+fn files() -> Vec<String> {
+    vec!["src/foo.rs".to_string()]
+}
+
 #[test]
 fn a_finished_run_decides_the_verdict() {
     let repo = repo();
@@ -21,7 +26,7 @@ fn a_finished_run_decides_the_verdict() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, PASS);
     assert!(result.summary.contains("100.0% killed (min 70)"));
@@ -42,7 +47,7 @@ fn a_kill_rate_above_the_minimum_passes_and_reports_the_numbers() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, PASS);
     assert!(result.summary.contains("91.3% killed (min 70)"));
@@ -74,7 +79,7 @@ fn a_kill_rate_exactly_at_the_minimum_passes() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, PASS);
     assert!(result.summary.contains("70.0% killed (min 70)"));
@@ -91,7 +96,7 @@ fn a_kill_rate_below_the_minimum_fails_and_lists_the_survivors() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, FAIL);
     assert!(result.summary.contains("40.0% killed (min 70)"));
@@ -111,7 +116,7 @@ fn an_iterated_pass_counts_the_excluded_mutants_as_killed() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, PASS);
     assert!(result.summary.contains("80.0% killed (min 70)"));
@@ -137,7 +142,7 @@ fn an_endless_run_times_out_as_incomplete() {
     let repo = repo();
     let stub = MutationStub::new(vec![]).answers(&[("cargo mutants", 124, "still going")]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, INCOMPLETE);
     assert!(result.summary.contains("timed out after 3600s"));
@@ -152,7 +157,7 @@ fn a_pass_that_wrote_no_report_is_incomplete() {
         "cargo-mutants: nothing to do",
     )]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, INCOMPLETE);
     assert_eq!(result.summary, "cargo-mutants produced no report");
@@ -177,7 +182,7 @@ fn a_timed_out_mutant_is_incomplete() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, INCOMPLETE, "a timeout is not a verdict");
     assert!(
@@ -214,7 +219,7 @@ fn an_unclassified_mutant_is_incomplete() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(
         result.status, INCOMPLETE,
@@ -247,7 +252,7 @@ fn a_failed_baseline_is_incomplete() {
         ..Pass::default()
     })]);
 
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &[]));
+    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
 
     assert_eq!(result.status, INCOMPLETE);
     assert!(
@@ -261,7 +266,8 @@ fn a_failed_baseline_is_incomplete() {
 fn a_stale_report_from_an_earlier_run_is_never_read() {
     let repo = repo();
     let config = config_for(&repo);
-    let run = gate_run_for(&repo, &config, &[]);
+    let files = files();
+    let run = gate_run_for(&repo, &config, &files);
     // A leftover report where the gate keeps its state: were it read, this
     // valid-looking pass would decide the verdict.
     write_pass(
@@ -289,7 +295,8 @@ fn the_pass_names_its_own_output_directory() {
     let scratch = repo.root.join("scratch");
     std::fs::create_dir_all(&scratch).expect("scratch");
     let config = config_for(&repo);
-    let mut run = gate_run_for(&repo, &config, &[]);
+    let files = files();
+    let mut run = gate_run_for(&repo, &config, &files);
     run.scratch = &scratch;
     let stub = MutationStub::new(vec![Some(Pass::default())]);
 

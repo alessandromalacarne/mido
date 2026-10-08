@@ -10,7 +10,6 @@ fn failure_report_gives_contract_evidence_and_fix() {
             target: "frontend",
             revision: "fa5bac38",
             dirty: "abc123",
-            base: "origin/mvp",
             attempts: None,
         },
         Style::plain(),
@@ -19,7 +18,6 @@ fn failure_report_gives_contract_evidence_and_fix() {
     assert!(report.contains("╭─ failure"), "{report}");
     assert!(report.contains("│ BLOCKED — size=FAIL"), "{report}");
     assert!(report.contains("│ target   frontend"), "{report}");
-    assert!(report.contains("│ base     origin/mvp"), "{report}");
     assert!(report.contains("│ failing  1 of 3 gates"), "{report}");
     assert!(report.contains("[2/6] ✗ size — FAIL"), "{report}");
     assert!(
@@ -104,12 +102,9 @@ fn banner_reports_the_revision_it_measured() {
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
-            scope: Scope::Diff,
-            base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",
-            changed: &["lib/src/foo.rs".to_string()],
-            selected_how: "",
+            files: &["lib/src/foo.rs".to_string()],
             source_label: "rust",
             source_count: 1,
         },
@@ -127,12 +122,9 @@ fn the_banner_is_a_panel_of_labelled_fields() {
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
-            scope: Scope::Diff,
-            base: "origin/mvp",
             revision: "fa5bac38",
             dirty: "abc123",
-            changed: &["lib/src/foo.rs".to_string()],
-            selected_how: "auto",
+            files: &["lib/src/foo.rs".to_string()],
             source_label: "rust",
             source_count: 1,
         },
@@ -140,35 +132,10 @@ fn the_banner_is_a_panel_of_labelled_fields() {
     );
 
     assert!(banner.starts_with("╭─ mido ─"), "{banner}");
-    assert!(
-        banner.contains("│ target   workspace (./) [auto]"),
-        "{banner}"
-    );
-    assert!(banner.contains("│ base     origin/mvp"), "{banner}");
+    assert!(banner.contains("│ target   workspace (./)"), "{banner}");
     assert!(banner.contains("│ revision fa5bac38"), "{banner}");
-    assert!(banner.contains("│ changed  1 files (1 rust)"), "{banner}");
-    assert!(banner.ends_with("lib/src/foo.rs"), "files follow the panel");
-}
-
-#[test]
-fn a_whole_target_banner_names_its_scope_and_measured_files() {
-    let banner = render_banner(
-        &Target::workspace_target("Cargo.toml"),
-        &BannerContext {
-            scope: Scope::Whole,
-            changed: &["src/foo.rs".to_string()],
-            source_label: "rust",
-            source_count: 1,
-            ..BannerContext::default()
-        },
-        Style::plain(),
-    );
-
-    assert!(
-        banner.contains("│ scope    whole target (no diff)"),
-        "{banner}"
-    );
     assert!(banner.contains("│ measured 1 files (1 rust)"), "{banner}");
+    assert!(banner.ends_with("lib/src/foo.rs"), "files follow the panel");
 }
 
 #[test]
@@ -203,15 +170,14 @@ fn the_panels_shorten_the_hashes_for_the_eye() {
 
 #[test]
 fn banner_counts_the_rust_files_and_caps_the_listing() {
-    let changed: Vec<String> = (0..25).map(|index| format!("src/file{index}.rs")).collect();
+    let files: Vec<String> = (0..25).map(|index| format!("src/file{index}.rs")).collect();
 
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
-            base: "HEAD",
-            changed: &changed,
+            files: &files,
             source_label: "rust",
-            source_count: changed.len(),
+            source_count: files.len(),
             ..BannerContext::default()
         },
         Style::plain(),
@@ -224,17 +190,16 @@ fn banner_counts_the_rust_files_and_caps_the_listing() {
 
 #[test]
 fn a_listing_of_exactly_the_cap_is_not_truncated() {
-    let changed: Vec<String> = (0..MAX_BANNER_FILES)
+    let files: Vec<String> = (0..MAX_BANNER_FILES)
         .map(|index| format!("src/file{index}.rs"))
         .collect();
 
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
-            base: "HEAD",
-            changed: &changed,
+            files: &files,
             source_label: "rust",
-            source_count: changed.len(),
+            source_count: files.len(),
             ..BannerContext::default()
         },
         Style::plain(),
@@ -243,13 +208,12 @@ fn a_listing_of_exactly_the_cap_is_not_truncated() {
     assert!(!banner.contains("more"));
     assert!(banner.contains(&format!("src/file{}.rs", MAX_BANNER_FILES - 1)));
 
-    let mut one_more = changed;
+    let mut one_more = files;
     one_more.push("src/over.rs".to_string());
     let banner = render_banner(
         &Target::workspace_target("Cargo.toml"),
         &BannerContext {
-            base: "HEAD",
-            changed: &one_more,
+            files: &one_more,
             source_label: "rust",
             source_count: one_more.len(),
             ..BannerContext::default()
