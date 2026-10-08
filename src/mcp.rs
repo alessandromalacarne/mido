@@ -19,10 +19,10 @@ const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 /// What the client is told about using this server.
 const INSTRUCTIONS: &str = "\
 mido runs the six-gate guardrails ladder (syntax, size, analysis, tests, coverage, mutation) \
-against one target of a repository. Call run_ladder to measure a change: the text result is the \
-report meant for you. exit_code 0 = SHIP-READY, 1 = BLOCKED (a gate failed; the fix hints are \
-inside), 2 = INCOMPLETE (a gate could not run — usually missing tooling) or a setup error. \
-list_targets shows what can be measured before naming a target.";
+against the whole workspace of a repository, or the packages you name. Call run_ladder: the \
+text result is the report meant for you. exit_code 0 = SHIP-READY, 1 = BLOCKED (a gate failed; \
+the fix hints are inside), 2 = INCOMPLETE (a gate could not run — usually missing tooling) or a \
+setup error. list_targets shows the packages that can be named.";
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;

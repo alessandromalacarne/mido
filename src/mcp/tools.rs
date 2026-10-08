@@ -12,7 +12,7 @@ fn list_targets_schema() -> Value {
         "name": "list_targets",
         "description": "List every target the ladder can measure in the repository — the \
                         workspace, its members, standalone crates and declared targets — with \
-                        name, path and kind. Call it before naming a target in run_ladder.",
+                        name, path and kind. Call it before naming a package in run_ladder.",
         "inputSchema": {
             "type": "object",
             "properties": { "repo": repo_arg(), "lang": lang_arg() },
@@ -24,10 +24,11 @@ fn list_targets_schema() -> Value {
 fn run_ladder_schema() -> Value {
     json!({
         "name": "run_ladder",
-        "description": "Run the guardrails ladder (`.mido.toml`) against one target and return \
-                        its report: exit_code 0 SHIP-READY, 1 BLOCKED (a gate failed; the report \
-                        carries evidence and fix hints), 2 INCOMPLETE (a gate could not run) or a \
-                        setup error. Tests and mutation can run for many minutes.",
+        "description": "Run the guardrails ladder (`.mido.toml`) against the whole workspace, \
+                        or the packages `-p` names, and return its report: exit_code 0 \
+                        SHIP-READY, 1 BLOCKED (a gate failed; the report carries evidence and \
+                        fix hints), 2 INCOMPLETE (a gate could not run) or a setup error. Tests \
+                        and mutation can run for many minutes.",
         "inputSchema": {
             "type": "object",
             "properties": run_ladder_properties(),
@@ -43,37 +44,21 @@ fn run_ladder_properties() -> Value {
     properties
 }
 
-/// What the run measures: the target, the repo, and the scope.
+/// What the run measures: the repo and the packages.
 fn selection_properties() -> Value {
     json!({
-        "target": {
-            "type": "string",
-            "default": "auto",
-            "description": "target name or path; default `auto` (inferred from the diff)",
-        },
         "repo": repo_arg(),
         "lang": lang_arg(),
-        "base": {
-            "type": "string",
-            "description": "ref the changed files are computed against; default: \
-                            origin/mvp, origin/develop, origin/master, else HEAD",
-        },
-        "paths": {
+        "packages": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "measure these files, folders or target names instead of the diff \
-                            (conflicts with base)",
-        },
-        "no_diff": {
-            "type": "boolean",
-            "default": false,
-            "description": "measure the whole target instead of the diff; no diff is read \
-                            (combine with paths to name specific files; conflicts with base)",
+            "description": "measure only these packages, by cargo package name; default: \
+                            the whole workspace",
         },
     })
 }
 
-/// Which gates run, over how many targets.
+/// Which gates run.
 fn ladder_switches() -> Value {
     let gate_names: Vec<&str> = crate::gate::GATES.iter().map(|gate| gate.name()).collect();
     json!({
@@ -84,11 +69,6 @@ fn ladder_switches() -> Value {
                 "enum": gate_names,
             },
             "description": "run only these gates; default: the whole ladder",
-        },
-        "all": {
-            "type": "boolean",
-            "default": false,
-            "description": "run every target in turn",
         },
         "apply_workspace_aid": {
             "type": "boolean",
@@ -168,15 +148,11 @@ fn list_targets(arguments: &Value) -> Result<Vec<String>, String> {
 }
 
 /// Every argument `run_ladder` accepts; anything else is a typo.
-const RUN_LADDER_ARGUMENTS: [&str; 12] = [
-    "target",
+const RUN_LADDER_ARGUMENTS: [&str; 8] = [
     "repo",
     "lang",
-    "base",
-    "paths",
-    "no_diff",
+    "packages",
     "gates",
-    "all",
     "apply_workspace_aid",
     "baseline_lcov",
     "report",
@@ -187,25 +163,20 @@ fn run_ladder(arguments: &Value) -> Result<Vec<String>, String> {
     reject_unknown(arguments, "run_ladder", &RUN_LADDER_ARGUMENTS)?;
 
     let mut argv = Vec::new();
-    if let Some(target) = string_arg(arguments, "target")? {
-        argv.push(target);
-    }
     value_flags(
         &mut argv,
         arguments,
-        &[("--repo", "repo"), ("--lang", "lang"), ("--base", "base")],
+        &[("--repo", "repo"), ("--lang", "lang")],
     )?;
     list_flags(
         &mut argv,
         arguments,
-        &[("--path", "paths"), ("--gate", "gates")],
+        &[("-p", "packages"), ("--gate", "gates")],
     )?;
     switch_flags(
         &mut argv,
         arguments,
         &[
-            ("--no-diff", "no_diff", false),
-            ("--all", "all", false),
             ("--apply-workspace-aid", "apply_workspace_aid", false),
             ("--json", "json", true),
         ],
