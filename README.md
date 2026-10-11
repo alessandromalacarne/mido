@@ -31,7 +31,8 @@ mido assumes an LLM wrote the change and an LLM reads the result.
   is exactly what runs. An agent editing the config cannot smuggle a pipeline
   into a gate.
 - Output defaults to where agent sessions already keep their artifacts
-  (`$COMMANDCODE_SCRATCHPAD`), and `--json` turns the verdict machine-readable.
+  (`$COMMANDCODE_SCRATCHPAD`); `--silent` keeps stdout empty with the report as
+  the only artifact, and `--json` turns the verdict machine-readable.
 - Speaks MCP: `mido mcp` serves the ladder as MCP tools on stdio, so an
   MCP-speaking agent calls it directly instead of shelling out.
 - Rendering is honest about who is watching: piped (or with `NO_COLOR`,
@@ -201,7 +202,7 @@ carries all of them.
 ```
 mido [-p NAME]… [--lang LANG] [--repo PATH] [--gate GATE]…
      [--list-targets] [--apply-workspace-aid]
-     [--baseline-lcov PATH] [--report PATH] [--json]
+     [--baseline-lcov PATH] [--report [PATH]] [--json] [--silent]
 mido mcp
 ```
 
@@ -214,6 +215,8 @@ mido --list-targets           # show what can be measured, then exit
 mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
 mido --report out.md          # write the markdown report
+mido --report                 # … at the repo's own .mido/report.md
+mido --silent --report        # nothing on stdout; the exit code is the verdict
 mido --baseline-lcov base.info         # coverage delta against a previous lcov
 mido mcp                      # serve the ladder as MCP tools on stdio
 ```
@@ -242,17 +245,19 @@ Two tools, each the CLI surface for one job:
 
 - `list_targets` — name, path and kind of every target the repo offers
   (`mido --list-targets`).
-- `run_ladder` — measures one target. The tool result is the run's report,
-  prefixed with `exit_code`; the tool is marked `isError` when the code is not
-  `0` — `1` BLOCKED (the failure report inside is the handoff), `2` INCOMPLETE
+- `run_ladder` — measures one target; silent by default, as `--silent --report`.
+  The tool result is `exit_code` plus anything stderr carries, and the markdown
+  report — evidence and fix hints — lands at the repo's own `.mido/report.md`.
+  `silent: false` restores the printed report, `report:` moves the file. The
+  tool is marked `isError` when the code is not `0` — `1` BLOCKED, `2` INCOMPLETE
   or a setup error. `tests` and `mutation` run for as long as the CLI takes.
 
 Every argument maps to a flag (`packages` maps to `-p`, alongside `repo`,
-`lang`, `gates`, `apply_workspace_aid`, `baseline_lcov`, `report`, `json`), so
-the CLI's rules — an unknown package is a setup error, and so is anything the
-server does not know — apply unchanged; a typo in an argument name is rejected,
-not dropped. stdout carries protocol messages only; anything the server itself
-has to say goes to stderr.
+`lang`, `gates`, `apply_workspace_aid`, `silent`, `baseline_lcov`, `report`,
+`json`), so the CLI's rules — an unknown package is a setup error, and so is
+anything the server does not know — apply unchanged; a typo in an argument name
+is rejected, not dropped. stdout carries protocol messages only; anything the
+server itself has to say goes to stderr.
 
 ## Workspace and packages
 
@@ -400,8 +405,12 @@ Each blocked gate carries its position in the ladder, the contract it enforced,
 the evidence, and the fix hints; a gate that passed is not restated.
 
 - `--report PATH` — explicit location; a relative path is resolved against the repo root.
+- `--report` without a path — the repo's own `.mido/report.md`, next to `.mido.toml`;
+  add `.mido/` to `.gitignore` so the report never enters the measured file set.
 - Without `--report`, the report goes to `$COMMANDCODE_SCRATCHPAD/guardrails-report.md`
   when the session sets that variable; otherwise only stdout carries it.
+- `--silent` — stdout carries nothing: the exit code is the verdict, the report
+  is the evidence, and stderr keeps its errors and warnings.
 - `--json` — the verdict as JSON, with per-gate statuses, for callers that parse.
 - Gate artifacts (coverage lcov, mutation output) live under
   `$COMMANDCODE_SCRATCHPAD/guardrails/` or `~/.cache/guardrails/`.

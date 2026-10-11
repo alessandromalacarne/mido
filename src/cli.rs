@@ -11,6 +11,9 @@ use std::path::PathBuf;
 
 pub use crate::gate::Gate;
 
+/// Where a bare `--report` writes: the repo's own file, next to `.mido.toml`.
+pub const DEFAULT_REPORT: &str = ".mido/report.md";
+
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "mido",
@@ -50,13 +53,17 @@ pub struct Args {
     #[arg(long = "baseline-lcov")]
     pub baseline_lcov: Option<PathBuf>,
 
-    /// write the report as markdown to this file
-    #[arg(long)]
+    /// write the report as markdown to this file; without a path: the repo's own .mido/report.md
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = DEFAULT_REPORT)]
     pub report: Option<PathBuf>,
 
     /// print the verdict as json
     #[arg(long)]
     pub json: bool,
+
+    /// print nothing on stdout; the exit code is the verdict, the report is the evidence
+    #[arg(long)]
+    pub silent: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -97,6 +104,10 @@ pub fn try_parse_from(argv: &[&str]) -> Result<Args, clap::Error> {
 }
 
 /// Run the ladder and turn its outcome into a process exit code.
+///
+/// `--silent` swaps stdout for a sink — every print goes through the `Io`, so
+/// one swap silences the whole run; the exit code stays the verdict and stderr
+/// keeps its errors and warnings.
 pub fn main_with(
     args: &Args,
     runner: &dyn Runner,
@@ -104,6 +115,8 @@ pub fn main_with(
     err: &mut dyn Write,
     style: Style,
 ) -> i32 {
+    let mut sink = std::io::sink();
+    let out: &mut dyn Write = if args.silent { &mut sink } else { out };
     let mut io = Io { out, err, style };
     match run_session(args, runner, &mut io) {
         Ok(code) => code,
@@ -182,6 +195,38 @@ mod tests {
 
         assert_eq!(args.repo, Some(PathBuf::from("/tmp/x")));
         assert_eq!(args.packages, vec!["frontend"]);
+        assert!(args.json);
+    }
+
+    #[test]
+    fn the_silent_flag_asks_for_no_stdout() {
+        let silent = try_parse_from(&["--silent"]).expect("--silent is a flag");
+        let loud = try_parse_from(&[]).expect("no flag is valid");
+
+        assert!(silent.silent);
+        assert!(!loud.silent);
+    }
+
+    #[test]
+    fn a_bare_report_flag_asks_for_the_repos_own_report() {
+        let args = try_parse_from(&["--report"]).expect("a bare --report is valid");
+
+        assert_eq!(args.report, Some(PathBuf::from(DEFAULT_REPORT)));
+    }
+
+    #[test]
+    fn a_report_flag_with_a_path_keeps_the_path() {
+        assert_eq!(
+            parse_from(&["--report", "out.md"]).report,
+            Some(PathBuf::from("out.md"))
+        );
+    }
+
+    #[test]
+    fn a_bare_report_flag_does_not_swallow_the_next_flag() {
+        let args = parse_from(&["--report", "--json"]);
+
+        assert_eq!(args.report, Some(PathBuf::from(DEFAULT_REPORT)));
         assert!(args.json);
     }
 
