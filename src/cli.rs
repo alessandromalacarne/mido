@@ -199,6 +199,38 @@ mod tests {
     }
 
     #[test]
+    fn the_silent_flag_asks_for_no_stdout() {
+        let silent = try_parse_from(&["--silent"]).expect("--silent is a flag");
+        let loud = try_parse_from(&[]).expect("no flag is valid");
+
+        assert!(silent.silent);
+        assert!(!loud.silent);
+    }
+
+    #[test]
+    fn a_bare_report_flag_asks_for_the_repos_own_report() {
+        let args = try_parse_from(&["--report"]).expect("a bare --report is valid");
+
+        assert_eq!(args.report, Some(PathBuf::from(DEFAULT_REPORT)));
+    }
+
+    #[test]
+    fn a_report_flag_with_a_path_keeps_the_path() {
+        assert_eq!(
+            parse_from(&["--report", "out.md"]).report,
+            Some(PathBuf::from("out.md"))
+        );
+    }
+
+    #[test]
+    fn a_bare_report_flag_does_not_swallow_the_next_flag() {
+        let args = parse_from(&["--report", "--json"]);
+
+        assert_eq!(args.report, Some(PathBuf::from(DEFAULT_REPORT)));
+        assert!(args.json);
+    }
+
+    #[test]
     fn the_mcp_subcommand_is_recognized() {
         assert_eq!(parse_from(&["mcp"]).command, Some(Command::Mcp));
     }
