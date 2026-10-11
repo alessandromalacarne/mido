@@ -11,6 +11,9 @@ use std::path::PathBuf;
 
 pub use crate::gate::Gate;
 
+/// Where a bare `--report` writes: the repo's own file, next to `.mido.toml`.
+pub const DEFAULT_REPORT: &str = ".mido/report.md";
+
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "mido",
@@ -50,13 +53,17 @@ pub struct Args {
     #[arg(long = "baseline-lcov")]
     pub baseline_lcov: Option<PathBuf>,
 
-    /// write the report as markdown to this file
-    #[arg(long)]
+    /// write the report as markdown to this file; without a path: the repo's own .mido/report.md
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = DEFAULT_REPORT)]
     pub report: Option<PathBuf>,
 
     /// print the verdict as json
     #[arg(long)]
     pub json: bool,
+
+    /// print nothing on stdout; the exit code is the verdict, the report is the evidence
+    #[arg(long)]
+    pub silent: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -97,6 +104,10 @@ pub fn try_parse_from(argv: &[&str]) -> Result<Args, clap::Error> {
 }
 
 /// Run the ladder and turn its outcome into a process exit code.
+///
+/// `--silent` swaps stdout for a sink — every print goes through the `Io`, so
+/// one swap silences the whole run; the exit code stays the verdict and stderr
+/// keeps its errors and warnings.
 pub fn main_with(
     args: &Args,
     runner: &dyn Runner,
@@ -104,6 +115,8 @@ pub fn main_with(
     err: &mut dyn Write,
     style: Style,
 ) -> i32 {
+    let mut sink = std::io::sink();
+    let out: &mut dyn Write = if args.silent { &mut sink } else { out };
     let mut io = Io { out, err, style };
     match run_session(args, runner, &mut io) {
         Ok(code) => code,
