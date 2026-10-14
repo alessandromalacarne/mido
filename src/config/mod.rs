@@ -235,6 +235,13 @@ impl Config {
         )
     }
 
+    /// A boolean setting — a switch the file writes as `true` or `false`.
+    pub fn flag(&self, gate: &str, key: &str, default: bool, target: Option<&str>) -> bool {
+        self.stored(gate, key, target)
+            .and_then(value::as_bool)
+            .unwrap_or(default)
+    }
+
     /// The argv this gate runs for this target, when the config declares one.
     ///
     /// `[targets.<name>.<gate>]` wins. A root section — the file's or the

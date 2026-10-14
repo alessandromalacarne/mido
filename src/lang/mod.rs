@@ -223,6 +223,14 @@ impl Lang {
         }
     }
 
+    /// Whether a mutation run's output says it found nothing to filter in the
+    /// scope it was given.
+    pub fn mutation_found_nothing(self, output: &str) -> bool {
+        match self {
+            Lang::Rust => rust::mutation::found_nothing(output),
+        }
+    }
+
     /// The arguments a declared test command carries to the test tool; `None`
     /// when the command names none, so the tool's own default applies.
     pub fn mutation_test_args(self, command: &[String]) -> Option<Vec<String>> {

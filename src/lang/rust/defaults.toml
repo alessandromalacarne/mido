@@ -29,7 +29,8 @@ coverage_min     = 80   # percent total line coverage of the measured target
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
-command       = ["cargo", "mutants", "-j2"]  # mido adds --output; later passes get --iterate
+command       = ["cargo", "mutants", "-j2"]  # mido adds --output and --in-diff; later passes get --iterate
+in_diff       = true                          # scope the sweep to the change: the slow gate only pays for what moved
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 

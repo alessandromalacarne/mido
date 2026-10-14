@@ -55,8 +55,13 @@ pub(super) fn mutation_reports(
         }
 
         let Some(report) = lang.mutation_report(output) else {
+            let summary = if lang.mutation_found_nothing(&text) {
+                "no mutant in the change — nothing measured".to_string()
+            } else {
+                no_report(lang)
+            };
             return Err(Unjudged {
-                summary: no_report(lang),
+                summary,
                 details: last_lines(&text, 10),
             });
         };
@@ -108,7 +113,14 @@ pub(super) fn judge_mutation(reports: &[PassReport], contract: &str, minimum: f6
         );
     }
 
+    // Nothing measured is nothing to judge: a run that produced no mutant at
+    // all — a comments-only change, a package with no mutable code — is
+    // INCOMPLETE, never a 0% kill rate.
     let killed = report.caught + report.skipped;
+    if killed + report.missed == 0 {
+        return incomplete("no mutant to measure".to_string(), Vec::new(), contract);
+    }
+
     let rate = percent(killed, killed + report.missed);
     let status = if rate < minimum { FAIL } else { PASS };
     let mut details = mutation_details(report);
