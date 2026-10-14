@@ -8,14 +8,14 @@ lint      = ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "
 typecheck = ["cargo", "check"]
 
 [size]
-tool           = "tokei"       # only tokei is supported today
+tool           = "tokei"       # the rust module measures with tokei
 file_loc     = { warn = 300, fail = 500 }  # non-blank, non-comment lines per file
 function_loc = { warn = 40,  fail = 60  }  # lines per function
 complexity   = { warn = 10,  fail = 15  }  # cyclomatic or cognitive, per function
 nesting      = { warn = 3,   fail = 4   }  # deepest block nesting
 
 [analysis]
-tool    = "rust-code-analysis"  # only rust-code-analysis is supported today
+tool    = "rust-code-analysis"  # the rust module measures with rust-code-analysis
 mi_min              = 20        # maintainability index floor (0–100, higher better)
 cognitive_max       = 15        # cognitive complexity, per function
 
