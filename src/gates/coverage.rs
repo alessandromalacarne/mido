@@ -2,6 +2,7 @@
 
 use crate::gate::Gate;
 use crate::gates::GateRun;
+use crate::lang::Lang;
 use crate::metrics::{lcov_files, percent, LcovStat};
 use crate::process::{self, Runner};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
@@ -9,12 +10,15 @@ use crate::targets::Target;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The argv to run, with `{lcov}` filled in, and the report it should write.
+/// The argv to run, with `{lcov}` filled in, and the report it should write:
+/// the path the command's own line names through the module, or the gate's
+/// `lcov.info` default beside the target.
 pub fn coverage_report_path(
     argv: &[String],
     repo: &Path,
     target: &Target,
     scratch: &Path,
+    lang: Lang,
 ) -> (Vec<String>, PathBuf) {
     let report = scratch.join(format!("guardrails-lcov-{}.info", target.name));
     let argv: Vec<String> = argv
@@ -22,27 +26,15 @@ pub fn coverage_report_path(
         .map(|arg| arg.replace("{lcov}", &report.to_string_lossy()))
         .collect();
 
-    let path = output_path(&argv).unwrap_or_else(|| PathBuf::from("lcov.info"));
+    let path = lang
+        .coverage_report(&argv)
+        .unwrap_or_else(|| PathBuf::from("lcov.info"));
     let path = if path.is_absolute() {
         path
     } else {
         target.dir(repo).join(path)
     };
     (argv, path)
-}
-
-/// Where the command says it writes: `--output-path <path>` or `--output-path=<path>`.
-fn output_path(argv: &[String]) -> Option<PathBuf> {
-    let mut args = argv.iter();
-    while let Some(arg) = args.next() {
-        if arg == "--output-path" {
-            return args.next().map(PathBuf::from);
-        }
-        if let Some(value) = arg.strip_prefix("--output-path=") {
-            return Some(PathBuf::from(value));
-        }
-    }
-    None
 }
 
 /// The total line coverage against its floor.
@@ -105,11 +97,10 @@ pub fn gate_coverage(runner: &dyn Runner, run: &GateRun<'_>) -> GateResult {
     } = *run;
     let minimum = config.float("coverage", "coverage_min", 80.0, Some(&target.name));
     let drop_max = config.float("coverage", "total_drop_max", 0.0, Some(&target.name));
-    let argv = config
-        .argv("coverage", "command", target)
-        .or_else(|| lang.fallback_argv("coverage", "command"))
+    let argv = lang
+        .coverage_command(config, target, repo)
         .unwrap_or_default();
-    let (argv, report_path) = coverage_report_path(&argv, repo, target, scratch);
+    let (argv, report_path) = coverage_report_path(&argv, repo, target, scratch, lang);
     let command = argv.join(" ");
     let contract = format!(
         "{} [coverage] coverage_min={minimum} via `{command}`",

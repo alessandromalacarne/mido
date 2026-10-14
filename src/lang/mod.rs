@@ -210,6 +210,32 @@ impl Lang {
         }
     }
 
+    /// The coverage command this module runs for a target: the config's own
+    /// first, then what the module derives for the repo, then its bare
+    /// fallback.
+    pub fn coverage_command(
+        self,
+        config: &crate::config::Config,
+        target: &crate::targets::Target,
+        repo: &Path,
+    ) -> Option<Vec<String>> {
+        match self {
+            Lang::Rust => config
+                .argv("coverage", "command", target)
+                .or_else(|| rust::fallback_argv("coverage", "command")),
+            Lang::JavaScript => node::coverage::command(config, target, repo),
+        }
+    }
+
+    /// Where the coverage command's own line says its report lands; `None`
+    /// when it names no path, and the gate's `lcov.info` default applies.
+    pub fn coverage_report(self, argv: &[String]) -> Option<std::path::PathBuf> {
+        match self {
+            Lang::Rust => rust::coverage::report_path(argv),
+            Lang::JavaScript => node::coverage::report_path(argv),
+        }
+    }
+
     /// The label the banner and reports use for this module's source files.
     pub fn source_label(self) -> &'static str {
         match self {

@@ -41,9 +41,9 @@ fn the_defaults_carry_the_javascript_baseline() {
         defaults["tests"].get("command").is_none(),
         "the suite derives the command from the package manager"
     );
-    assert_eq!(
-        string_array(&defaults["coverage"]["command"])[0..3],
-        ["npx", "--no-install", "c8"]
+    assert!(
+        defaults["coverage"].get("command").is_none(),
+        "the coverage command is derived from the repo's devDependencies"
     );
     assert_eq!(
         defaults["size"]["file_loc"]["fail"],
@@ -73,19 +73,6 @@ fn fallback_commands_are_the_bare_npx_ones() {
     );
     assert_eq!(js.fallback_argv("tests", "command"), argv(&["npm", "test"]));
     assert_eq!(
-        js.fallback_argv("coverage", "command"),
-        argv(&[
-            "npx",
-            "--no-install",
-            "c8",
-            "--reporter=lcovonly",
-            "--reports-dir",
-            ".",
-            "npm",
-            "test"
-        ])
-    );
-    assert_eq!(
         js.fallback_argv("mutation", "command"),
         argv(&["npx", "--no-install", "stryker", "run"])
     );
@@ -99,6 +86,11 @@ fn keys_that_have_no_fallback_stay_unset() {
     assert_eq!(js.fallback_argv("syntax", "command"), None);
     assert_eq!(js.fallback_argv("size", "command"), None);
     assert_eq!(js.fallback_argv("analysis", "command"), None);
+    assert_eq!(
+        js.fallback_argv("coverage", "command"),
+        None,
+        "the coverage command is derived, not a bare fallback"
+    );
 }
 
 #[test]

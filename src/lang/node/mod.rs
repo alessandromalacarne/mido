@@ -3,6 +3,7 @@
 //! test script and its runners, stryker. Everything here behaves the same for
 //! a `.js` and a `.ts` repo; the modules own what differs between them.
 
+pub mod coverage;
 pub mod diagnostics;
 pub mod mutation;
 pub mod suite;
@@ -27,16 +28,6 @@ pub fn fallback_argv(gate: &str, key: &str) -> Option<Vec<String>> {
         ("syntax", "format") => &["npx", "--no-install", "prettier", "--check", "."][..],
         ("syntax", "lint") => &["npx", "--no-install", "eslint", "."][..],
         ("tests", "command") => &["npm", "test"][..],
-        ("coverage", "command") => &[
-            "npx",
-            "--no-install",
-            "c8",
-            "--reporter=lcovonly",
-            "--reports-dir",
-            ".",
-            "npm",
-            "test",
-        ][..],
         ("mutation", "command") => &["npx", "--no-install", "stryker", "run"][..],
         _ => return None,
     };
