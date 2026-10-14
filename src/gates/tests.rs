@@ -171,6 +171,59 @@ fn the_size_gate_gets_the_function_metrics_it_judges() {
 }
 
 #[test]
+fn a_nested_target_is_measured_under_its_own_directory() {
+    let repo = repo();
+    std::fs::create_dir_all(repo.root.join("cli/src")).expect("dir");
+    std::fs::write(repo.root.join("cli/src/foo.rs"), "").expect("file");
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+    let document = serde_json::json!({
+        "spaces": [{ "name": "f", "kind": "function", "metrics": { "loc": { "sloc": 5 } } }]
+    });
+    let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 10 } }] } });
+    let runner = FakeRunner::with(&[
+        ("rust-code-analysis-cli", 0, &document.to_string()),
+        ("tokei", 0, &tokei.to_string()),
+    ])
+    .tool("cargo");
+    let target = Target::package_target("cli", true, "Cargo.toml");
+    let gates = [Gate::Size];
+    let files = vec!["src/foo.rs".to_string()];
+    let run = GateRun {
+        gates: &gates,
+        ..crate::test_support::gate_run(&repo.root, &target, &config, &files)
+    };
+
+    let results = run_gates(&runner, &run, &mut Vec::new(), Style::plain());
+
+    assert_eq!(results[0].status, crate::report::PASS);
+    assert!(
+        results[0].summary.contains("worst function 5 sloc"),
+        "the target's own file was never measured: {}",
+        results[0].summary
+    );
+}
+
+#[test]
+fn a_nested_targets_missing_file_is_not_measured() {
+    let repo = repo();
+    let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");
+    let runner = FakeRunner::default().tool("cargo");
+    let target = Target::package_target("cli", true, "Cargo.toml");
+    let gates = [Gate::Size];
+    let files = vec!["src/gone.rs".to_string()];
+    let run = GateRun {
+        gates: &gates,
+        ..crate::test_support::gate_run(&repo.root, &target, &config, &files)
+    };
+
+    let results = run_gates(&runner, &run, &mut Vec::new(), Style::plain());
+
+    assert_eq!(results[0].status, crate::report::PASS);
+    assert_eq!(results[0].summary, "no rust source files");
+    assert!(!runner.called_with("tokei"));
+}
+
+#[test]
 fn the_coverage_gate_is_dispatched_under_its_own_name() {
     let repo = repo();
     let config = Config::load(&repo.root, &Lang::Rust).expect("config loads");

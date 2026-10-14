@@ -43,11 +43,13 @@ pub fn run_gates(
 }
 
 /// The measured files that still exist — the counting tools choke on a path
-/// that is not there, so deleted files never reach them.
+/// that is not there, so deleted files never reach them. The files are the
+/// target's own, so they resolve under the target's directory.
 fn existing_sources(run: &GateRun<'_>) -> Vec<String> {
+    let dir = run.target.dir(run.repo);
     run.files
         .iter()
-        .filter(|path| run.lang.is_source(path) && run.repo.join(path).exists())
+        .filter(|path| run.lang.is_source(path) && dir.join(path).exists())
         .cloned()
         .collect()
 }
