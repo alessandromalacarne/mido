@@ -9,6 +9,40 @@ fn a_root_cargo_manifest_selects_the_rust_module() {
 }
 
 #[test]
+fn a_root_package_manifest_selects_the_javascript_module() {
+    let repo = crate::test_support::MiniJsRepo::build(None);
+
+    assert_eq!(Lang::infer(&repo.root), Ok(Lang::JavaScript));
+}
+
+#[test]
+fn cargo_wins_when_a_repo_carries_both_root_manifests() {
+    let repo = MiniRepo::build(None);
+    std::fs::write(
+        repo.root.join("package.json"),
+        "{ \"name\": \"tooling\" }\n",
+    )
+    .expect("manifest");
+
+    assert_eq!(Lang::infer(&repo.root), Ok(Lang::Rust));
+}
+
+#[test]
+fn every_module_is_known_by_name() {
+    let names: Vec<&str> = LANGS.iter().map(|lang| lang.name()).collect();
+
+    assert_eq!(names, vec!["rust", "javascript"]);
+}
+
+#[test]
+fn the_shared_metric_tools_ship_with_every_module() {
+    for lang in LANGS {
+        assert_eq!(lang.size_tool(), "tokei");
+        assert_eq!(lang.metrics_tool(), "rust-code-analysis");
+    }
+}
+
+#[test]
 fn no_recognized_manifest_is_a_setup_error_naming_the_languages() {
     let directory = tempfile::tempdir().expect("temp dir");
 
