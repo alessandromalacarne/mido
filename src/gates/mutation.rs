@@ -94,6 +94,7 @@ fn mutation_passes(
         .argv("mutation", "command", run.target)
         .or_else(|| lang.fallback_argv("mutation", "command"))
         .unwrap_or_default();
+    lang.mutation_prepare(output, &run.target.dir(run.repo))?;
 
     let mut driven: Vec<Vec<String>> = Vec::new();
     let mut passes: Vec<MutationPass> = Vec::new();

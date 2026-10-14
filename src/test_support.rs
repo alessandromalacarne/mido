@@ -14,11 +14,22 @@ pub fn gate_run<'a>(
     config: &'a Config,
     files: &'a [String],
 ) -> GateRun<'a> {
+    gate_run_with(Lang::Rust, repo, target, config, files)
+}
+
+/// A `GateRun` for whatever module the test is about.
+pub fn gate_run_with<'a>(
+    lang: Lang,
+    repo: &'a Path,
+    target: &'a Target,
+    config: &'a Config,
+    files: &'a [String],
+) -> GateRun<'a> {
     GateRun {
         repo,
         target,
         config,
-        lang: Lang::Rust,
+        lang,
         files,
         gates: &[],
         scratch: repo,
@@ -230,6 +241,70 @@ impl MiniRepo {
         }
         Self { root, _tmp: tmp }
     }
+}
+
+/// A miniature of the javascript package shape the ladder is meant to handle:
+/// a workspace root whose patterns match two members, a standalone package
+/// outside the workspace, and node_modules noise.
+pub struct MiniJsRepo {
+    pub root: PathBuf,
+    _tmp: tempfile::TempDir,
+}
+
+pub const JS_WORKSPACE_MANIFEST: &str = "\
+{
+  \"name\": \"mini\",
+  \"private\": true,
+  \"workspaces\": [\"packages/*\", \"tools\"]
+}
+";
+
+impl MiniJsRepo {
+    pub fn build(config: Option<&str>) -> Self {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path().to_path_buf();
+        std::fs::write(root.join("package.json"), JS_WORKSPACE_MANIFEST).expect("root manifest");
+        for (dir, name) in [
+            ("packages/alpha", "@mini/alpha"),
+            ("packages/beta", "@mini/beta"),
+            ("tools", "mini-tools"),
+            ("standalone", "standalone-cli"),
+        ] {
+            std::fs::create_dir_all(root.join(dir)).expect("package dir");
+            std::fs::write(
+                root.join(dir).join("package.json"),
+                format!("{{ \"name\": \"{name}\" }}\n"),
+            )
+            .expect("package manifest");
+        }
+        std::fs::create_dir_all(root.join("node_modules/noise")).expect("noise dir");
+        std::fs::write(
+            root.join("node_modules/noise/package.json"),
+            "{ \"name\": \"noise\" }\n",
+        )
+        .expect("noise manifest");
+
+        if let Some(config) = config {
+            std::fs::write(root.join(".mido.toml"), dedent(config)).expect("config");
+        }
+        Self { root, _tmp: tmp }
+    }
+}
+
+/// The javascript baseline loaded over a fixture repo.
+pub fn js_config_for(repo: &MiniJsRepo) -> Config {
+    Config::load(&repo.root, &Lang::JavaScript).expect("config loads")
+}
+
+/// The common gate-test bundle for the javascript module: a workspace-target
+/// run over a fixture repo, against the javascript baseline.
+pub fn js_gate_run_for<'a>(
+    repo: &'a MiniJsRepo,
+    config: &'a Config,
+    files: &'a [String],
+) -> GateRun<'a> {
+    let target = Box::leak(Box::new(Target::workspace_target("package.json")));
+    gate_run_with(Lang::JavaScript, &repo.root, target, config, files)
 }
 
 /// `textwrap.dedent`: drop the common indentation, keep every line — including

@@ -73,12 +73,14 @@ pub enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum LangArg {
     Rust,
+    Javascript,
 }
 
 impl LangArg {
     pub fn lang(self) -> Lang {
         match self {
             LangArg::Rust => Lang::Rust,
+            LangArg::Javascript => Lang::JavaScript,
         }
     }
 }

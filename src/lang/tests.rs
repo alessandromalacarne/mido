@@ -17,8 +17,9 @@ fn no_recognized_manifest_is_a_setup_error_naming_the_languages() {
         .render();
 
     assert!(message.contains("no language module recognizes this repo"));
-    assert!(message.contains("known languages: rust"));
-    assert!(message.contains("--lang rust"));
+    assert!(message.contains("looked for Cargo.toml, package.json"));
+    assert!(message.contains("known languages: rust, javascript"));
+    assert!(message.contains("--lang"));
 }
 
 #[test]

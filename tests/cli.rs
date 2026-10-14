@@ -96,7 +96,11 @@ fn the_language_module_is_inferred_from_the_environment() {
         errors.contains("no language module recognizes this repo"),
         "{errors}"
     );
-    assert!(errors.contains("--lang rust"), "{errors}");
+    assert!(
+        errors.contains("known languages: rust, javascript"),
+        "{errors}"
+    );
+    assert!(errors.contains("--lang"), "{errors}");
 }
 
 #[test]
