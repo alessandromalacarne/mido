@@ -76,6 +76,9 @@ fn tools_list_exposes_the_ladder_and_target_discovery() {
     assert_eq!(run["repo"]["type"], "string");
     assert_eq!(run["apply_workspace_aid"]["type"], "boolean");
     assert_eq!(run["apply_workspace_aid"]["default"], false);
+    assert_eq!(run["silent"]["type"], "boolean");
+    assert_eq!(run["silent"]["default"], true);
+    assert_eq!(run["report"]["default"], ".mido/report.md");
     assert!(
         run.get("target").is_none() && run.get("paths").is_none() && run.get("base").is_none(),
         "the removed scope arguments are not advertised: {run}"
@@ -101,7 +104,7 @@ fn run_ladder_maps_arguments_onto_the_cli() {
 
     assert_eq!(
         stub.argv().join(" "),
-        "--repo /repo -p lib -p cli --gate tests --gate coverage --report out.md"
+        "--repo /repo -p lib -p cli --gate tests --gate coverage --silent --report out.md"
     );
     assert_eq!(response["result"]["isError"], true);
     let text = response["result"]["content"][0]["text"]
@@ -113,7 +116,7 @@ fn run_ladder_maps_arguments_onto_the_cli() {
 }
 
 #[test]
-fn run_ladder_defaults_to_json_and_can_run_the_whole_workspace() {
+fn run_ladder_defaults_to_silence_and_the_repos_own_report() {
     let stub = Stub::new(0);
     let response = handle_line(
         r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
@@ -122,8 +125,37 @@ fn run_ladder_defaults_to_json_and_can_run_the_whole_workspace() {
     )
     .expect("answered");
 
-    assert_eq!(stub.argv(), ["--apply-workspace-aid", "--json"]);
+    assert_eq!(
+        stub.argv(),
+        ["--silent", "--apply-workspace-aid", "--json", "--report"]
+    );
     assert_eq!(response["result"]["isError"], false);
+}
+
+#[test]
+fn run_ladder_can_turn_its_default_silence_off() {
+    let stub = Stub::new(0);
+    handle_line(
+        r#"{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{
+            "name":"run_ladder","arguments":{"silent":false}}}"#,
+        &stub,
+    )
+    .expect("answered");
+
+    assert_eq!(stub.argv(), ["--json", "--report"]);
+}
+
+#[test]
+fn an_empty_report_argument_asks_for_the_default_path() {
+    let stub = Stub::new(0);
+    handle_line(
+        r#"{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{
+            "name":"run_ladder","arguments":{"report":""}}}"#,
+        &stub,
+    )
+    .expect("answered");
+
+    assert_eq!(stub.argv(), ["--silent", "--json", "--report"]);
 }
 
 #[test]
@@ -136,7 +168,7 @@ fn run_ladder_passes_a_single_package_with_the_short_flag() {
     )
     .expect("answered");
 
-    assert_eq!(stub.argv(), ["-p", "lib", "--json"]);
+    assert_eq!(stub.argv(), ["-p", "lib", "--silent", "--json", "--report"]);
 }
 
 #[test]
@@ -257,7 +289,7 @@ fn a_null_list_argument_is_treated_as_absent() {
     )
     .expect("answered");
 
-    assert_eq!(stub.argv(), ["--json"]);
+    assert_eq!(stub.argv(), ["--silent", "--json", "--report"]);
 }
 
 #[test]

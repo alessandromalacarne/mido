@@ -31,7 +31,8 @@ mido assumes an LLM wrote the change and an LLM reads the result.
   is exactly what runs. An agent editing the config cannot smuggle a pipeline
   into a gate.
 - Output defaults to where agent sessions already keep their artifacts
-  (`$COMMANDCODE_SCRATCHPAD`), and `--json` turns the verdict machine-readable.
+  (`$COMMANDCODE_SCRATCHPAD`); `--silent` keeps stdout empty with the report as
+  the only artifact, and `--json` turns the verdict machine-readable.
 - Speaks MCP: `mido mcp` serves the ladder as MCP tools on stdio, so an
   MCP-speaking agent calls it directly instead of shelling out.
 - Rendering is honest about who is watching: piped (or with `NO_COLOR`,
@@ -70,10 +71,11 @@ project built with LLMs should not ship below. Start by copying this repo's
   owns the default commands, the output parsers, target detection, the workspace aid and the
   embedded baseline contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
   module recognizes exits 2 and says so.
-- Measures the **whole workspace** — no diff is read. `-p NAME` (repeatable,
-  package semantics: the name the target's manifest declares) narrows the run to
-  the packages you name, each measured whole: the workspace roll-up is what
-  runs without one.
+- Measures the **whole workspace** — no diff decides what the gates run. `-p NAME`
+  (repeatable, package semantics: the name the target's manifest declares) narrows the
+  run to the packages you name, each measured whole: the workspace roll-up is what
+  runs without one. The mutation gate is the one gate that reads the change, and
+  only to keep its sweep affordable (see *Mutation is scoped to the change*).
 - Stamps the verdict on the exact revision it measured (`HEAD` plus a dirty-state
   hash), so a green verdict cannot be reused on changed code.
 - Prints a failure report meant for the next reader (human or agent): gate
@@ -91,14 +93,14 @@ project built with LLMs should not ship below. Start by copying this repo's
 | 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis`, both modules |
 | 4 | `tests` | the test command passes | rust: `cargo test` · javascript: the package manager's `test` script (lockfile-detected) |
 | 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | rust: `cargo llvm-cov` · javascript: `c8` (lcov) |
-| 6 | `mutation` | percentage of mutants killed in the package | rust: `cargo-mutants` · javascript: `stryker` |
+| 6 | `mutation` | percentage of mutants killed in the change — the whole package with `in_diff = false`, which is the javascript default | rust: `cargo-mutants` · javascript: `stryker` |
 
 Built-in defaults, all overridable in `.mido.toml`:
 
 - **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4
 - **analysis** — maintainability index ≥ 20; cognitive complexity ≤ 15
 - **coverage** — total ≥ 80%; drop ≤ 0 points
-- **mutation** — kill rate ≥ 70%
+- **mutation** — kill rate ≥ 70%, scoped to the change (see below)
 - **timeouts** — syntax 1800s, tests 900s, mutation 3600s
 
 The javascript baseline carries the same thresholds; it differs in its commands:
@@ -218,7 +220,7 @@ install:
 ```
 mido [-p NAME]… [--lang LANG] [--repo PATH] [--gate GATE]…
      [--list-targets] [--apply-workspace-aid]
-     [--baseline-lcov PATH] [--report PATH] [--json]
+     [--baseline-lcov PATH] [--report [PATH]] [--json] [--silent]
 mido mcp
 ```
 
@@ -231,6 +233,8 @@ mido --list-targets           # show what can be measured, then exit
 mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
 mido --report out.md          # write the markdown report
+mido --report                 # … at the repo's own .mido/report.md
+mido --silent --report        # nothing on stdout; the exit code is the verdict
 mido --baseline-lcov base.info         # coverage delta against a previous lcov
 mido mcp                      # serve the ladder as MCP tools on stdio
 ```
@@ -259,21 +263,26 @@ Two tools, each the CLI surface for one job:
 
 - `list_targets` — name, path and kind of every target the repo offers
   (`mido --list-targets`).
-- `run_ladder` — measures one target. The tool result is the run's report,
-  prefixed with `exit_code`; the tool is marked `isError` when the code is not
-  `0` — `1` BLOCKED (the failure report inside is the handoff), `2` INCOMPLETE
+- `run_ladder` — measures one target; silent by default, as `--silent --report`.
+  The tool result is `exit_code` plus anything stderr carries, and the markdown
+  report — evidence and fix hints — lands at the repo's own `.mido/report.md`.
+  `silent: false` restores the printed report, `report:` moves the file. The
+  tool is marked `isError` when the code is not `0` — `1` BLOCKED, `2` INCOMPLETE
   or a setup error. `tests` and `mutation` run for as long as the CLI takes.
 
 Every argument maps to a flag (`packages` maps to `-p`, alongside `repo`,
-`lang`, `gates`, `apply_workspace_aid`, `baseline_lcov`, `report`, `json`), so
-the CLI's rules — an unknown package is a setup error, and so is anything the
-server does not know — apply unchanged; a typo in an argument name is rejected,
-not dropped. stdout carries protocol messages only; anything the server itself
-has to say goes to stderr.
+`lang`, `gates`, `apply_workspace_aid`, `silent`, `baseline_lcov`, `report`,
+`json`), so the CLI's rules — an unknown package is a setup error, and so is
+anything the server does not know — apply unchanged; a typo in an argument name
+is rejected, not dropped. stdout carries protocol messages only; anything the
+server itself has to say goes to stderr.
 
 ## Workspace and packages
 
-Every gate measures the whole target; no diff is read. Without `-p`, that target
+Every gate measures the whole target; no diff decides which files are measured —
+with one exception. The mutation gate scopes its sweep to the change, because a
+full mutation sweep is the one thing in the ladder that costs minutes (see
+*Mutation is scoped to the change*). Without `-p`, that target
 is the **workspace** roll-up: the package at the repo root, or the workspace
 those members belong to, minus the packages the root manifest excludes (cargo
 `exclude`, npm `!` patterns). The measured set
@@ -347,6 +356,7 @@ total_drop_max   = 0    # percentage points of total coverage you tolerate losin
 
 [mutation]
 command       = ["cargo", "mutants", "-j2"]
+in_diff       = true           # scope the sweep to the change: mutation is the slow gate
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 
@@ -392,9 +402,35 @@ Notes:
   `[profile.mutants]` inheriting `test` with `debug = "none"` in `Cargo.toml`
   and a `.cargo/mutants.toml` with `test_tool = "nextest"` and
   `profile = "mutants"`, with `-j2` on the command: the mutants run two at a
-  time. Every timed run is a fresh sweep of the package — the gate never
-  reuses a previous run's kills. When a sweep is slow, cargo-mutants'
+  time. Every timed run is a fresh sweep of the scope — the gate never
+  reuses a previous run's kills. When a sweep is still slow, cargo-mutants'
   performance guide applies directly: <https://mutants.rs/performance.html>.
+
+### Mutation is scoped to the change
+
+Mutation testing is by far the most expensive gate: a full sweep builds and
+tests every mutant in the package, which on a real crate is minutes to hours,
+while what a handoff needs to know is whether the tests catch broken code in
+*what changed*. So `[mutation] in_diff` defaults to `true` and every pass runs
+`cargo-mutants --in-diff <file>` on a diff mido generates with git: the merge
+base with the repo's default branch (`origin/HEAD`, else `origin/main`,
+`origin/master`, `main`, `master`; `HEAD` when none resolves) up to the working
+tree, untracked source files included, scoped to the target by a pathspec. The
+kill rate — and the verdict — are decided by the mutants the change touches, so
+the gate's cost scales with the change, not with the package.
+
+A change that touches no rust file of the target passes with that stated as its
+evidence ("no rust file in the change"); a rust file whose changed lines yield no
+mutant (comments only) is INCOMPLETE, never a silent pass — a scope mistake can
+never hide behind a green mutation gate. Set `in_diff = false` to sweep the whole
+target; a command that names its own `--in-diff` is a conflict (INCOMPLETE)
+unless the switch is off, so the two scopes never fight.
+
+The scope is rust's: `--in-diff` is a cargo-mutants flag, and stryker has no
+equivalent (it scopes through the `mutate` globs in its own config). So the
+javascript baseline ships `in_diff = false` and a javascript target sweeps the
+whole package; asking for `in_diff = true` there is refused with that reason
+rather than silently dropped.
 
 ## Reports
 
@@ -427,8 +463,12 @@ Each blocked gate carries its position in the ladder, the contract it enforced,
 the evidence, and the fix hints; a gate that passed is not restated.
 
 - `--report PATH` — explicit location; a relative path is resolved against the repo root.
+- `--report` without a path — the repo's own `.mido/report.md`, next to `.mido.toml`;
+  add `.mido/` to `.gitignore` so the report never enters the measured file set.
 - Without `--report`, the report goes to `$COMMANDCODE_SCRATCHPAD/guardrails-report.md`
   when the session sets that variable; otherwise only stdout carries it.
+- `--silent` — stdout carries nothing: the exit code is the verdict, the report
+  is the evidence, and stderr keeps its errors and warnings.
 - `--json` — the verdict as JSON, with per-gate statuses, for callers that parse.
 - Gate artifacts (coverage lcov, mutation output) live under
   `$COMMANDCODE_SCRATCHPAD/guardrails/` or `~/.cache/guardrails/`.

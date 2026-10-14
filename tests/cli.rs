@@ -70,6 +70,8 @@ fn help_names_the_selection_surface_and_the_verdict_vocabulary() {
     assert!(help.contains("SHIP-READY"), "{help}");
     assert!(help.contains("--package"), "{help}");
     assert!(help.contains("--lang"), "{help}");
+    assert!(help.contains("--silent"), "{help}");
+    assert!(help.contains("--report"), "{help}");
     assert!(!help.contains("--path"), "{help}");
     assert!(!help.contains("--no-diff"), "{help}");
     assert!(
@@ -211,6 +213,20 @@ fn the_binary_measures_a_named_package_whole() {
     assert!(printed.contains("measured 3 files (2 rust)"), "{printed}");
     assert!(printed.contains("  src/lib.rs"), "{printed}");
     assert!(printed.contains("  src/other.rs"), "{printed}");
+}
+
+#[test]
+fn a_silent_report_run_leaves_the_evidence_in_the_repo() {
+    let repo = mini_repo();
+    lib_sources(&repo);
+
+    let output = run(repo.path(), &["--gate", "tests", "--silent", "--report"]);
+    let printed = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{printed}");
+    assert!(printed.is_empty(), "a silent run prints nothing: {printed}");
+    let report = std::fs::read_to_string(repo.path().join(".mido/report.md")).expect("report");
+    assert!(report.contains("VERDICT: SHIP-READY"), "{report}");
 }
 
 #[test]

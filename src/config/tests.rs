@@ -60,6 +60,33 @@ fn lint_command_comes_from_the_config() {
 }
 
 #[test]
+fn the_mutation_diff_switch_reads_the_file_over_the_module_default() {
+    let bare = MiniRepo::build(None);
+    assert!(
+        load(&bare)
+            .expect("config loads")
+            .flag("mutation", "in_diff", true, Some("workspace")),
+        "the module default scopes a mutation run to the change"
+    );
+
+    let repo = repo(
+        "
+            version = 1
+
+            [mutation]
+            in_diff = false
+
+            [targets.frontend.mutation]
+            in_diff = true
+        ",
+    );
+    let config = load(&repo).expect("config loads");
+
+    assert!(!config.flag("mutation", "in_diff", true, Some("workspace")));
+    assert!(config.flag("mutation", "in_diff", true, Some("frontend")));
+}
+
+#[test]
 fn unknown_key_is_a_config_error_naming_key_and_section() {
     let repo = repo(
         "

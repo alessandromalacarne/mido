@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 mod git;
 
-pub use git::{all_files, dirty_hash, git, workspace_root};
+pub use git::{all_files, change_base, dirty_hash, git, workspace_root};
 
 pub const TIMEOUT_EXIT: i32 = 124;
 pub const NOT_FOUND_EXIT: i32 = 127;

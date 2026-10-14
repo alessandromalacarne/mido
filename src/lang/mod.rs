@@ -250,18 +250,22 @@ impl Lang {
 
     /// One mutation pass's argv: the configured command plus what the module's
     /// mutation tool needs to run under mido's own output directory, carrying
-    /// the test arguments of the suite the pass drives. A command that names
-    /// its own output is a conflict the module refuses.
+    /// the test arguments of the suite the pass drives and, when the run is
+    /// scoped, the change diff. A command that names its own output — or its
+    /// own scope under a scoped run — is a conflict the module refuses.
     pub fn mutation_pass_args(
         self,
         base: &[String],
         test_args: &[String],
         iterate: bool,
         output: &Path,
+        in_diff: Option<&Path>,
     ) -> Result<Vec<String>, GuardrailsError> {
         match self {
-            Lang::Rust => rust::mutation::pass_args(base, test_args, iterate, output),
-            Lang::JavaScript => javascript::mutation::pass_args(base, test_args, iterate, output),
+            Lang::Rust => rust::mutation::pass_args(base, test_args, iterate, output, in_diff),
+            Lang::JavaScript => {
+                javascript::mutation::pass_args(base, test_args, iterate, output, in_diff)
+            }
         }
     }
 
@@ -271,6 +275,17 @@ impl Lang {
         match self {
             Lang::Rust => rust::mutation::report::read(output_dir),
             Lang::JavaScript => javascript::mutation::report::read(output_dir),
+        }
+    }
+
+    /// Whether a mutation run's output says it found nothing to filter in the
+    /// scope it was given.
+    pub fn mutation_found_nothing(self, output: &str) -> bool {
+        match self {
+            Lang::Rust => rust::mutation::found_nothing(output),
+            // Stryker prints no such signal, and the change scope is not wired
+            // for javascript yet: its sweep is the whole package.
+            Lang::JavaScript => false,
         }
     }
 

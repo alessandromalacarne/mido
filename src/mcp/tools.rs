@@ -26,9 +26,11 @@ fn run_ladder_schema() -> Value {
         "name": "run_ladder",
         "description": "Run the guardrails ladder (`.mido.toml`) against the whole workspace, \
                         or the packages `-p` names, and return its report: exit_code 0 \
-                        SHIP-READY, 1 BLOCKED (a gate failed; the report carries evidence and \
-                        fix hints), 2 INCOMPLETE (a gate could not run) or a setup error. Tests \
-                        and mutation can run for many minutes.",
+                        SHIP-READY, 1 BLOCKED (a gate failed), 2 INCOMPLETE (a gate could not \
+                        run) or a setup error. Silent by default: stdout carries nothing, and \
+                        the markdown report — evidence and fix hints included — is written to \
+                        `.mido/report.md` in the repository. Tests and mutation can run for \
+                        many minutes.",
         "inputSchema": {
             "type": "object",
             "properties": run_ladder_properties(),
@@ -77,6 +79,12 @@ fn ladder_switches() -> Value {
             "description": "add the local [workspace] aid when a worktree's manifest misses \
                             one, so cargo resolves the crate's own root",
         },
+        "silent": {
+            "type": "boolean",
+            "default": true,
+            "description": "print nothing on stdout: exit_code is the verdict and the report \
+                            file is the evidence; false returns the full printed report",
+        },
     })
 }
 
@@ -89,7 +97,9 @@ fn reporting_properties() -> Value {
         },
         "report": {
             "type": "string",
-            "description": "write the markdown report to this path",
+            "default": crate::cli::DEFAULT_REPORT,
+            "description": "where the markdown report is written, resolved against the repo \
+                            root; default: the repo's own `.mido/report.md`",
         },
         "json": {
             "type": "boolean",
@@ -149,12 +159,13 @@ fn list_targets(arguments: &Value) -> Result<Vec<String>, String> {
 }
 
 /// Every argument `run_ladder` accepts; anything else is a typo.
-const RUN_LADDER_ARGUMENTS: [&str; 8] = [
+const RUN_LADDER_ARGUMENTS: [&str; 9] = [
     "repo",
     "lang",
     "packages",
     "gates",
     "apply_workspace_aid",
+    "silent",
     "baseline_lcov",
     "report",
     "json",
@@ -178,6 +189,7 @@ fn run_ladder(arguments: &Value) -> Result<Vec<String>, String> {
         &mut argv,
         arguments,
         &[
+            ("--silent", "silent", true),
             ("--apply-workspace-aid", "apply_workspace_aid", false),
             ("--json", "json", true),
         ],
@@ -185,10 +197,22 @@ fn run_ladder(arguments: &Value) -> Result<Vec<String>, String> {
     value_flags(
         &mut argv,
         arguments,
-        &[("--baseline-lcov", "baseline_lcov"), ("--report", "report")],
+        &[("--baseline-lcov", "baseline_lcov")],
     )?;
+    report_flag(&mut argv, arguments)?;
 
     Ok(argv)
+}
+
+/// The report flag is on by default: a caller that names no path still gets a
+/// report, at the repo's own `.mido/report.md`.
+fn report_flag(argv: &mut Vec<String>, arguments: &Value) -> Result<(), String> {
+    argv.push("--report".to_string());
+    match string_arg(arguments, "report")? {
+        Some(path) if !path.is_empty() => argv.push(path),
+        _ => {}
+    }
+    Ok(())
 }
 
 /// The one-value flags: `--flag value` when the argument is present.

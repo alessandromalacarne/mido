@@ -73,13 +73,29 @@ pub fn prepare(output: &Path, work_dir: &Path) -> Result<(), GuardrailsError> {
 /// One pass's argv: the configured command, carrying mido's own config. The
 /// test arguments a pass could carry are none — stryker runs the test runner
 /// its config names. A command that names a config of its own is a conflict,
-/// not an override.
+/// not an override, and a change-scoped run is refused outright: stryker has
+/// no `--in-diff`, and mido never drops a scope it was asked for silently.
 pub fn pass_args(
     base: &[String],
     _test_args: &[String],
     _iterate: bool,
     output: &Path,
+    in_diff: Option<&Path>,
 ) -> Result<Vec<String>, GuardrailsError> {
+    if let Some(diff) = in_diff {
+        return Err(GuardrailsError::setup(
+            "the javascript module has no change scope for stryker",
+        )
+        .detail(format!(
+            "the run was asked to read {}, but stryker scopes its sweep through the \
+             mutate globs in its own config — a diff scope is not wired yet",
+            diff.display()
+        ))
+        .hint(
+            "set `in_diff = false` in [mutation] (the javascript default) to sweep the \
+             whole package",
+        ));
+    }
     if names_own_config(base) {
         return Err(GuardrailsError::setup(
             "the configured mutation command names its own stryker config",

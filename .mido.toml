@@ -29,6 +29,7 @@ total_drop_max   = 0    # percentage points of total coverage you tolerate losin
 
 [mutation]
 command       = ["cargo", "mutants", "-j2"]
+in_diff       = true           # scope the sweep to the change: mutation is the slow gate
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 

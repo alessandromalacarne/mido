@@ -105,6 +105,42 @@ fn all_files_merges_tracked_and_untracked_files() {
 }
 
 #[test]
+fn the_change_base_is_the_merge_base_with_the_default_branch() {
+    let runner = FakeRunner::with(&[
+        ("origin/HEAD", 0, "c0ffee\n"),
+        ("merge-base", 0, "c0ffee\n"),
+    ]);
+
+    assert_eq!(change_base(&runner, Path::new("/repo")), "c0ffee");
+    assert!(
+        runner.called_with("merge-base HEAD origin/HEAD"),
+        "the change starts where the branch left the default branch"
+    );
+}
+
+#[test]
+fn the_change_base_skips_a_ref_that_names_no_merge_base() {
+    let runner = FakeRunner::with(&[
+        ("merge-base HEAD origin/HEAD", 0, "\n"),
+        ("origin/HEAD", 0, "c0ffee\n"),
+        ("origin/master", 0, "beef\n"),
+    ]);
+
+    assert_eq!(change_base(&runner, Path::new("/repo")), "beef");
+}
+
+#[test]
+fn without_a_default_branch_the_change_base_is_head() {
+    let runner = FakeRunner::default();
+
+    assert_eq!(
+        change_base(&runner, Path::new("/repo")),
+        "HEAD",
+        "no default branch to compare against leaves the working tree as the change"
+    );
+}
+
+#[test]
 fn dirty_hash_hashes_the_short_status() {
     let runner = FakeRunner::with(&[("hash-object", 0, "abc123\n")]);
 

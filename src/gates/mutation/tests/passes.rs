@@ -32,7 +32,8 @@ fn rust_files() -> Vec<String> {
 
 /// The union fixture: the native suite catches the one mutant it can see and
 /// misses five; the browser journeys get those survivors, catch four, and leave
-/// one equivalent mutant alive.
+/// one equivalent mutant alive. The change is the member's own file, as the
+/// workspace-root-relative diff spells it.
 fn native_then_browser() -> MutationStub {
     MutationStub::new(vec![
         Some(Pass {
@@ -50,6 +51,7 @@ fn native_then_browser() -> MutationStub {
             ..Pass::default()
         }),
     ])
+    .change(&["frontend/src/foo.rs"])
 }
 
 #[test]
@@ -115,7 +117,8 @@ fn a_pass_with_nothing_left_keeps_the_verdict_of_the_earlier_passes() {
             skipped: vec!["a", "b", "c", "d", "e", "f"],
             ..Pass::default()
         }),
-    ]);
+    ])
+    .change(&["frontend/src/foo.rs"]);
 
     let run = frontend_run(&repo, &config, &files);
     let result = gate_mutation(&stub, &run);
@@ -141,7 +144,8 @@ fn the_first_pass_keeps_the_configured_command_without_iterate() {
     browser_tested_frontend(&repo);
     let config = config_for(&repo);
     let files = rust_files();
-    let stub = MutationStub::new(vec![Some(Pass::default()), Some(Pass::default())]);
+    let stub = MutationStub::new(vec![Some(Pass::default()), Some(Pass::default())])
+        .change(&["frontend/src/foo.rs"]);
 
     let run = frontend_run(&repo, &config, &files);
     gate_mutation(&stub, &run);

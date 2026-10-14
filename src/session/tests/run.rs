@@ -290,3 +290,83 @@ fn a_declared_target_without_a_manifest_is_a_setup_error() {
     assert_eq!(code, 2);
     assert!(err.contains("Cargo.toml"), "{err}");
 }
+
+#[test]
+fn a_silent_run_prints_nothing_to_stdout() {
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (0, "test result: ok. 3 passed; 0 failed\n"),
+    );
+
+    let (code, out, err) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--gate",
+            "tests",
+            "--silent",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{err}");
+    assert!(out.is_empty(), "a silent run prints nothing: {out}");
+    assert!(err.is_empty(), "{err}");
+}
+
+#[test]
+fn a_bare_report_flag_lands_at_the_repos_own_mido_report() {
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (0, "test result: ok. 3 passed; 0 failed\n"),
+    );
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--gate",
+            "tests",
+            "--silent",
+            "--report",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "{out}");
+    assert!(out.is_empty(), "{out}");
+    let markdown = std::fs::read_to_string(repo.root.join(".mido/report.md")).expect("report");
+    assert!(markdown.contains("VERDICT: SHIP-READY"), "{markdown}");
+}
+
+#[test]
+fn a_silent_blocked_run_keeps_its_evidence_in_the_report() {
+    let repo = MiniRepo::build(tests_config());
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (101, "test result: FAILED. 0 passed; 2 failed\n"),
+    );
+
+    let (code, out, err) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--gate",
+            "tests",
+            "--silent",
+            "--report",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 1);
+    assert!(out.is_empty(), "{out}");
+    assert!(err.contains("error: guardrails BLOCKED"), "{err}");
+    let markdown = std::fs::read_to_string(repo.root.join(".mido/report.md")).expect("report");
+    assert!(
+        markdown.contains("VERDICT: BLOCKED — tests=FAIL"),
+        "{markdown}"
+    );
+}

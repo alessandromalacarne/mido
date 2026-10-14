@@ -21,6 +21,7 @@ fn a_pass_carries_midos_own_config_positionally() {
         &[],
         false,
         Path::new("/run/mutants"),
+        None,
     )
     .expect("a pass");
 
@@ -37,6 +38,20 @@ fn a_pass_carries_midos_own_config_positionally() {
 }
 
 #[test]
+fn a_change_scoped_run_is_refused() {
+    let error = pass_args(
+        &argv(&["npx", "--no-install", "stryker", "run"]),
+        &[],
+        false,
+        Path::new("/run"),
+        Some(Path::new("/run/guardrails-mutants-workspace.diff")),
+    )
+    .expect_err("stryker has no --in-diff");
+
+    assert!(error.render().contains("has no change scope"));
+}
+
+#[test]
 fn a_command_that_names_its_own_config_is_refused() {
     let error = pass_args(
         &argv(&[
@@ -49,6 +64,7 @@ fn a_command_that_names_its_own_config_is_refused() {
         &[],
         false,
         Path::new("/run"),
+        None,
     )
     .expect_err("a conflict");
 
