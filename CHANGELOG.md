@@ -4,6 +4,48 @@ Notable changes to `mido-guard` — the `mido` binary. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The npm modules measure with eslint, each language module carries its own
+measurement tools, and a reading that never arrived is never a zero.
+
+### Added
+
+- **`size` and `analysis` for the npm modules, measured by eslint.** One
+  `eslint --format json` pass with the metric rules injected at a floor that
+  makes every reading report itself — `max-lines` (code lines per file),
+  `max-lines-per-function`, `complexity` (cyclomatic) and `max-depth` (deepest
+  block, per file) — read back into the units the gates judge. The cognitive
+  ceiling comes from the repo's own `sonarjs/cognitive-complexity` rule: a
+  project that does not load the plugin fails the pass loudly, with eslint's
+  complaint as the evidence, instead of measuring nothing.
+- **`.mts`/`.cts` are measured** by the typescript module — eslint parses them,
+  and a file the repo's own eslint config leaves out is INCOMPLETE, naming the
+  file and the tool's complaint.
+- **A missing maintainability index is never a 100.** `Unit.mi` is optional: the
+  node modules report none, and their `analysis` contract says so instead of
+  judging a floor nobody measured. Setting `[analysis] mi_min` where the stack
+  reports no index is INCOMPLETE, with a fix hint.
+
+### Changed
+
+- **Measurement is the module's own pass**: `Lang::measure` answers with file
+  lines, block nesting, function units and what could not be read, and each
+  module drives its own tools there (rust: `rust/tokei` + `rust/code_analysis`;
+  the node modules: `node/eslint`). The gates judge readings and never measure,
+  and `[size] tool` / `[analysis] tool` are checked against what the module
+  drives — a mismatch is INCOMPLETE with a pointer, never a silent substitution.
+- **Every measurement error makes `size` and `analysis` INCOMPLETE alike**: a
+  file the tool could not parse, or the repo's eslint config leaves out, is
+  named in the evidence instead of being silently absent from the readings.
+
+### Fixed
+
+- **`.cjs` is measured again.** The javascript module keeps `.cjs` as source,
+  and measuring with eslint — instead of rust-code-analysis, which skips
+  CommonJS silently — means repos carrying `.cjs` files no longer sit at `size`
+  INCOMPLETE.
+
 ## [0.3.0] - 2026-10-14
 
 Every gate now measures the whole target — the workspace roll-up, or the
