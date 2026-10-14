@@ -4,7 +4,7 @@ Notable changes to `mido-guard` — the `mido` binary. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-14
 
 The npm modules measure with eslint, each language module carries its own
 measurement tools, and a reading that never arrived is never a zero.

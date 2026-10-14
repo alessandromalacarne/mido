@@ -69,7 +69,8 @@ project built with LLMs should not ship below. Start by copying this repo's
 - Drives one **language module** at a time — inferred from the repo (a root `Cargo.toml`
   selects `rust`, a root `tsconfig.json` selects `typescript`, a root `package.json`
   selects `javascript`) or forced with `--lang`. The module
-  owns the default commands, the output parsers, target detection, the workspace aid and the
+  owns the default commands, the output parsers, target detection, the
+  measurement behind `size` and `analysis`, the workspace aid and the
   embedded baseline contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
   module recognizes exits 2 and says so.
 - Measures the **whole workspace** — no diff decides what the gates run. `-p NAME`
@@ -516,7 +517,7 @@ and the six gates are run against the workspace before handoff.
 | `src/cli.rs` | the argv surface and exit codes |
 | `src/gate.rs` | the gate vocabulary: names, order, fix hints — the one gate list |
 | `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
-| `src/lang/` | language modules — `rust`, `typescript`, `javascript` — each carrying the tools it measures with (rust: `tokei`, `rust-code-analysis`; the node modules: `eslint`), plus the node ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc parsing, test runners, stryker, coverage) |
+| `src/lang/` | language modules — `rust`, `typescript`, `javascript` — each carrying the tools it measures with (rust: `tokei`, `rust-code-analysis`; the node modules: `eslint`), plus the node ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc parsing, the eslint measurement, test runners, stryker, coverage) |
 | `src/session.rs` | one run: what is measured, in what order, what is printed (`session/{setup,output}.rs`) |
 | `src/targets.rs` | target scoping and the measured file set |
 | `src/config/` | `.mido.toml` loading, validation and defaults |
