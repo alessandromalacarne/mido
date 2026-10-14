@@ -99,7 +99,7 @@ fn the_language_module_is_inferred_from_the_environment() {
         "{errors}"
     );
     assert!(
-        errors.contains("known languages: rust, javascript"),
+        errors.contains("known languages: rust, typescript, javascript"),
         "{errors}"
     );
     assert!(errors.contains("--lang"), "{errors}");
@@ -123,6 +123,37 @@ fn a_package_manifest_selects_the_javascript_module() {
     assert_eq!(output.status.code(), Some(0), "{printed}");
     assert!(printed.contains("workspace"), "{printed}");
     assert!(printed.contains("tools"), "{printed}");
+}
+
+#[test]
+fn a_root_tsconfig_selects_the_typescript_module() {
+    let repo = tempfile::tempdir().expect("temp dir");
+    write(
+        repo.path().join("package.json"),
+        "{ \"name\": \"mini\", \"workspaces\": [\"tools\"] }\n",
+    );
+    write(repo.path().join("tsconfig.json"), "{}\n");
+    write(
+        repo.path().join("tools/package.json"),
+        "{ \"name\": \"mini-tools\" }\n",
+    );
+
+    let output = run(repo.path(), &["--list-targets"]);
+    let printed = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{printed}");
+    assert!(printed.contains("workspace"), "{printed}");
+    assert!(printed.contains("tools"), "{printed}");
+}
+
+#[test]
+fn the_typescript_module_can_be_forced_on_a_bare_repo() {
+    let bare = tempfile::tempdir().expect("temp dir");
+
+    let output = run(bare.path(), &["--lang", "typescript", "--list-targets"]);
+
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(stdout(&output).contains("workspace"));
 }
 
 #[test]

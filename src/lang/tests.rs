@@ -16,6 +16,17 @@ fn a_root_package_manifest_selects_the_javascript_module() {
 }
 
 #[test]
+fn a_tsconfig_makes_an_npm_repo_typescripts() {
+    let repo = crate::test_support::MiniJsRepo::build(None);
+    std::fs::write(repo.root.join("tsconfig.json"), "{}\n").expect("tsconfig");
+
+    // The root also carries a package.json: the first module whose manifest is
+    // there wins, and typescript comes before javascript in LANGS.
+    assert!(repo.root.join("package.json").exists());
+    assert_eq!(Lang::infer(&repo.root), Ok(Lang::TypeScript));
+}
+
+#[test]
 fn cargo_wins_when_a_repo_carries_both_root_manifests() {
     let repo = MiniRepo::build(None);
     std::fs::write(
@@ -23,6 +34,7 @@ fn cargo_wins_when_a_repo_carries_both_root_manifests() {
         "{ \"name\": \"tooling\" }\n",
     )
     .expect("manifest");
+    std::fs::write(repo.root.join("tsconfig.json"), "{}\n").expect("tsconfig");
 
     assert_eq!(Lang::infer(&repo.root), Ok(Lang::Rust));
 }
@@ -31,7 +43,7 @@ fn cargo_wins_when_a_repo_carries_both_root_manifests() {
 fn every_module_is_known_by_name() {
     let names: Vec<&str> = LANGS.iter().map(|lang| lang.name()).collect();
 
-    assert_eq!(names, vec!["rust", "javascript"]);
+    assert_eq!(names, vec!["rust", "typescript", "javascript"]);
 }
 
 #[test]
@@ -51,8 +63,8 @@ fn no_recognized_manifest_is_a_setup_error_naming_the_languages() {
         .render();
 
     assert!(message.contains("no language module recognizes this repo"));
-    assert!(message.contains("looked for Cargo.toml, package.json"));
-    assert!(message.contains("known languages: rust, javascript"));
+    assert!(message.contains("looked for Cargo.toml, tsconfig.json, package.json"));
+    assert!(message.contains("known languages: rust, typescript, javascript"));
     assert!(message.contains("--lang"));
 }
 
