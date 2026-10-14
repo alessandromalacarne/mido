@@ -26,9 +26,20 @@ fn a_document_yields_its_functions_at_any_depth() {
     assert_eq!(units[0].sloc, 12);
     assert_eq!(units[0].cyclomatic, 3);
     assert_eq!(units[0].cognitive, 2);
-    assert!((units[0].mi - 55.5).abs() < f64::EPSILON);
+    assert_eq!(units[0].mi, Some(55.5));
     assert_eq!(units[1].name, "inner");
     assert_eq!(units[1].path, "src/foo.rs");
+}
+
+#[test]
+fn a_document_without_an_index_leaves_it_unmeasured() {
+    let document = serde_json::json!({
+        "spaces": [{ "name": "f", "kind": "function", "metrics": { "loc": { "sloc": 3 } } }]
+    });
+
+    let units = units_from_document("src/foo.rs", &document);
+
+    assert_eq!(units[0].mi, None, "a missing reading is never a 100");
 }
 
 #[test]
@@ -79,41 +90,6 @@ fn function_metrics_are_read_from_the_tool() {
 
     assert_eq!(units.len(), 1);
     assert_eq!(units[0].name, "parse");
-    assert!(errors.is_empty());
-}
-
-#[test]
-fn a_javascript_document_reads_the_same_way() {
-    let repo = MiniRepo::build(None);
-    let document = serde_json::json!({
-        "spaces": [{
-            "name": "classify",
-            "kind": "function",
-            "metrics": {
-                "loc": { "sloc": 4 },
-                "cyclomatic": { "sum": 3 },
-                "cognitive": { "sum": 3 },
-                "mi": { "mi_original": 85.5 }
-            }
-        }]
-    });
-    let runner = FakeRunner::with(&[("rust-code-analysis-cli", 0, &document.to_string())]);
-    let mut errors = Vec::new();
-
-    let units = analysis_units(
-        &runner,
-        &repo.root,
-        &Target::workspace_target("package.json"),
-        &["src/calc.js".to_string()],
-        "node",
-        &mut errors,
-    );
-
-    assert_eq!(units.len(), 1);
-    assert_eq!(units[0].name, "classify");
-    assert_eq!(units[0].sloc, 4);
-    assert_eq!(units[0].cyclomatic, 3);
-    assert_eq!(units[0].cognitive, 3);
     assert!(errors.is_empty());
 }
 

@@ -4,12 +4,10 @@ use crate::config::{Config, Threshold};
 use crate::gate::Gate;
 use crate::gates::GateRun;
 use crate::lang::Lang;
-use crate::metrics::Unit;
-use crate::process::Runner;
+use crate::metrics::{Measurements, Unit};
 use crate::report::{GateResult, FAIL, INCOMPLETE, PASS};
 use crate::targets::Target;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 /// The `[size]` ceilings for one target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +57,31 @@ pub fn judge_file_sizes(
             ));
         } else {
             details.push(format!("file {path}: {code} code lines (ok)"));
+        }
+    }
+    (problems, details)
+}
+
+/// The deepest block of each file against the one nesting ceiling — the
+/// granularity a rule that counts blocks, and not functions, can report.
+pub fn judge_file_nesting(
+    depths: &BTreeMap<String, i64>,
+    limits: &SizeLimits,
+) -> (Vec<String>, Vec<String>) {
+    let mut problems = Vec::new();
+    let mut details = Vec::new();
+
+    for (path, depth) in depths {
+        if *depth >= limits.nesting.fail {
+            problems.push(format!(
+                "{path}: nesting depth {depth} (fail >= {})",
+                limits.nesting.fail
+            ));
+        } else if *depth >= limits.nesting.warn {
+            details.push(format!(
+                "file {path}: nesting depth {depth} (warn >= {})",
+                limits.nesting.warn
+            ));
         }
     }
     (problems, details)
@@ -131,115 +154,87 @@ pub fn judge_function_metrics(units: &[Unit], limits: &SizeLimits) -> (Vec<Strin
     (problems, near_ceiling)
 }
 
-pub fn gate_size(
-    runner: &dyn Runner,
-    run: &GateRun<'_>,
-    units: &[Unit],
-    tool_errors: &[String],
-) -> GateResult {
+pub fn gate_size(run: &GateRun<'_>, measurements: &Measurements) -> GateResult {
     let GateRun {
-        repo,
         target,
-        files,
         config,
         lang,
         ..
     } = *run;
     let limits = size_limits(config, target);
-    let source_files = existing_source_files(lang, repo, target, files);
-    let mut measurement_errors: Vec<String> = tool_errors.to_vec();
+    let contract = limits.describe(&config.source());
+    let tool = config.text_setting("size", "tool", lang.size_tool(), Some(&target.name));
 
-    let lines = measured_lines(runner, run, &source_files, &mut measurement_errors);
-    let (problems, mut details) = judgement(units, &limits, &lines);
-    details.extend(evidence_notes(
-        units,
-        lang.metrics_tool(),
-        &measurement_errors,
-        &source_files,
-    ));
+    if let Some(result) = unsupported_tool(&tool, &contract, lang) {
+        return result;
+    }
 
-    let status = size_status(&problems, &measurement_errors, units, &source_files);
+    let (problems, mut details) = judgement(measurements, &limits);
+    details.extend(evidence_notes(measurements, lang.metrics_tool()));
+
+    let status = size_status(&problems, measurements);
     GateResult::new(
         "size",
         status,
-        worst_summary(units, lang),
+        worst_summary(measurements, lang),
         details.into_iter().chain(problems).collect::<Vec<_>>(),
     )
-    .contract(limits.describe(&config.source()))
+    .contract(contract)
     .fixes(Gate::Size.fix_hints().iter().copied())
 }
 
-/// The code lines the size tool reports; measurement failures land in
-/// `measurement_errors` and measure nothing.
-fn measured_lines(
-    runner: &dyn Runner,
-    run: &GateRun<'_>,
-    source_files: &[String],
-    measurement_errors: &mut Vec<String>,
-) -> BTreeMap<String, i64> {
-    let GateRun {
-        repo,
-        target,
-        config,
-        lang,
-        ..
-    } = *run;
-    let tool = config.text_setting("size", "tool", lang.size_tool(), Some(&target.name));
-    lang.code_lines(
-        runner,
-        repo,
-        target,
-        source_files,
-        &tool,
-        measurement_errors,
+/// A `tool` this module cannot drive is INCOMPLETE, never a pass.
+fn unsupported_tool(tool: &str, contract: &str, lang: Lang) -> Option<GateResult> {
+    let supported = lang.size_tool();
+    if tool == supported {
+        return None;
+    }
+
+    Some(
+        GateResult::new(
+            "size",
+            INCOMPLETE,
+            format!("tool `{tool}` is not supported by this module"),
+            [format!(
+                "`.mido.toml` names `{tool}`; the {} module measures with {supported}",
+                lang.name()
+            )],
+        )
+        .contract(contract)
+        .fixes([format!(
+            "point [size] tool at {supported}, or extend the module with a parser for that tool"
+        )]),
     )
 }
 
 /// The problems and evidence one measurement pass produced.
-fn judgement(
-    units: &[Unit],
-    limits: &SizeLimits,
-    lines: &BTreeMap<String, i64>,
-) -> (Vec<String>, Vec<String>) {
-    let (file_problems, mut details) = judge_file_sizes(lines, limits);
-    let (unit_problems, unit_details) = judge_function_metrics(units, limits);
-    details.extend(unit_details);
-    let mut problems = file_problems;
-    problems.extend(unit_problems);
-    (problems, details)
-}
+fn judgement(measurements: &Measurements, limits: &SizeLimits) -> (Vec<String>, Vec<String>) {
+    let (mut problems, mut details) = judge_file_sizes(&measurements.lines, limits);
+    let (nesting_problems, nesting_details) = judge_file_nesting(&measurements.nesting, limits);
+    problems.extend(nesting_problems);
+    details.extend(nesting_details);
 
-/// The measured source files that still exist — a deleted file has nothing to
-/// measure, and tokei fails on a path that is not there.
-fn existing_source_files(
-    lang: Lang,
-    repo: &Path,
-    target: &Target,
-    files: &[String],
-) -> Vec<String> {
-    files
-        .iter()
-        .filter(|path| lang.is_source(path) && target.dir(repo).join(path).exists())
-        .cloned()
-        .collect()
+    let (unit_problems, unit_details) = judge_function_metrics(&measurements.units, limits);
+    problems.extend(unit_problems);
+    details.extend(unit_details);
+    (problems, details)
 }
 
 /// The measurement caveats a passing size gate still has to admit: a tool that
 /// could not read a file, metrics that never arrived, nesting that is absent.
-fn evidence_notes(
-    units: &[Unit],
-    tool: &str,
-    measurement_errors: &[String],
-    source_files: &[String],
-) -> Vec<String> {
-    let mut notes: Vec<String> = measurement_errors
+fn evidence_notes(measurements: &Measurements, tool: &str) -> Vec<String> {
+    let mut notes: Vec<String> = measurements
+        .errors
         .iter()
         .map(|error| format!("measurement: {error}"))
         .collect();
-    if units.is_empty() && !source_files.is_empty() {
+    if measurements.units.is_empty() && !measurements.files.is_empty() {
         notes.push(format!("function metrics: {tool} returned nothing"));
     }
-    if !units.is_empty() && units.iter().all(|unit| unit.nesting.is_none()) {
+    if !measurements.units.is_empty()
+        && measurements.nesting.is_empty()
+        && measurements.units.iter().all(|unit| unit.nesting.is_none())
+    {
         notes.push(format!(
             "nesting: not measured ({tool} exposes no nesting metric for this input)"
         ));
@@ -248,28 +243,28 @@ fn evidence_notes(
 }
 
 /// A measured problem fails; missing measurements are INCOMPLETE, never a pass.
-fn size_status(
-    problems: &[String],
-    measurement_errors: &[String],
-    units: &[Unit],
-    source_files: &[String],
-) -> &'static str {
+fn size_status(problems: &[String], measurements: &Measurements) -> &'static str {
     if !problems.is_empty() {
         return FAIL;
     }
-    if !measurement_errors.is_empty() || (units.is_empty() && !source_files.is_empty()) {
+    if !measurements.errors.is_empty()
+        || (measurements.units.is_empty() && !measurements.files.is_empty())
+    {
         return INCOMPLETE;
     }
     PASS
 }
 
-fn worst_summary(units: &[Unit], lang: Lang) -> String {
-    match units.iter().max_by_key(|unit| unit.sloc) {
+fn worst_summary(measurements: &Measurements, lang: Lang) -> String {
+    match measurements.units.iter().max_by_key(|unit| unit.sloc) {
         Some(worst) => format!(
             "worst function {} sloc / cc {} ({})",
             worst.sloc, worst.cyclomatic, worst.name
         ),
-        None => format!("no {} source files", lang.source_label()),
+        None if measurements.files.is_empty() => {
+            format!("no {} source files", lang.source_label())
+        }
+        None => format!("no functions in {} file(s)", measurements.files.len()),
     }
 }
 

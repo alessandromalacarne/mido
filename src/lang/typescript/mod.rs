@@ -10,10 +10,10 @@ pub const MARKER: &str = "tsconfig.json";
 /// The manifest every npm package carries; targets are scoped by it.
 pub const MANIFEST: &str = crate::lang::node::MANIFEST;
 pub const SOURCE_LABEL: &str = "typescript";
-/// The extensions the module treats as source — the ones rust-code-analysis
-/// parses. `.mts`/`.cts` are absent because the metrics tool silently skips
-/// them, and a file it cannot read is `INCOMPLETE`, not a measurement.
-pub const SOURCE_EXTS: [&str; 2] = [".ts", ".tsx"];
+/// The extensions the module treats as source, `.mts`/`.cts` included: the
+/// module measures with eslint, which parses them, and a file the project's
+/// own eslint config leaves out is `INCOMPLETE`, not a measurement.
+pub const SOURCE_EXTS: [&str; 4] = [".ts", ".tsx", ".mts", ".cts"];
 /// The binary whose presence means the dev environment is set up.
 pub const ENV_TOOL: &str = "node";
 

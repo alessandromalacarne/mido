@@ -1,6 +1,5 @@
 //! rust-code-analysis: one metrics document per file, read into the `Unit`s the
-//! size and analysis gates judge — for every language the tool parses (rust,
-//! javascript, typescript).
+//! rust module's size and analysis gates judge.
 
 use crate::metrics::Unit;
 use crate::process::{self, Runner};
@@ -105,7 +104,7 @@ fn unit_from_space(path: &str, space: &Json) -> Unit {
         cyclomatic: family_value(&metrics, "cyclomatic", "sum").unwrap_or_default(),
         cognitive: family_value(&metrics, "cognitive", "sum").unwrap_or_default(),
         nesting: nesting_of(&metrics),
-        mi: family_float(&metrics, "mi", "mi_original").unwrap_or(100.0),
+        mi: family_float(&metrics, "mi", "mi_original"),
     }
 }
 

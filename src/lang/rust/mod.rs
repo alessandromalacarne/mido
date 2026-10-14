@@ -1,9 +1,11 @@
 //! The rust module: cargo targets, rustc/clippy diagnostics, libtest output,
-//! cargo-mutants — and the embedded rust baseline config.
+//! cargo-mutants, the tokei and rust-code-analysis measurement pass — and the
+//! embedded rust baseline config.
 
 pub mod aid;
 pub mod coverage;
 pub mod diagnostics;
+pub mod metrics;
 pub mod mutation;
 pub mod suite;
 pub mod targets;

@@ -11,7 +11,7 @@ pub use crate::gate::Gate;
 
 use crate::config::Config;
 use crate::lang::Lang;
-use crate::metrics::Unit;
+use crate::metrics::Measurements;
 use crate::process::Runner;
 use crate::report::{gate_line, gate_progress_line, GateResult, SKIPPED};
 use crate::style::Style;
@@ -38,10 +38,8 @@ pub fn run_gates(
     out: &mut dyn Write,
     style: Style,
 ) -> Vec<GateResult> {
-    let source_files = existing_sources(run);
-    let mut tool_errors: Vec<String> = Vec::new();
-    let units = measured_units(runner, run, &source_files, &mut tool_errors);
-    run_each(runner, run, &units, &tool_errors, out, style)
+    let measurements = measure(runner, run);
+    run_each(runner, run, &measurements, out, style)
 }
 
 /// The measured files that still exist — the counting tools choke on a path
@@ -54,31 +52,26 @@ fn existing_sources(run: &GateRun<'_>) -> Vec<String> {
         .collect()
 }
 
-/// Function metrics serve the size and analysis gates only; nothing else pays
-/// for a rust-code-analysis pass.
-fn measured_units(
-    runner: &dyn Runner,
-    run: &GateRun<'_>,
-    source_files: &[String],
-    tool_errors: &mut Vec<String>,
-) -> Vec<Unit> {
-    let wants_units = run
+/// What one measurement pass answered. The size and analysis gates are the
+/// only ones that judge readings, so nothing else pays for the pass.
+fn measure(runner: &dyn Runner, run: &GateRun<'_>) -> Measurements {
+    let wants_measurements = run
         .gates
         .iter()
         .any(|gate| matches!(gate, Gate::Size | Gate::Analysis));
-    if source_files.is_empty() || !wants_units {
-        return Vec::new();
+    let source_files = existing_sources(run);
+    if source_files.is_empty() || !wants_measurements {
+        return Measurements::default();
     }
     run.lang
-        .analysis_units(runner, run.repo, run.target, source_files, tool_errors)
+        .measure(runner, run.repo, run.target, &source_files)
 }
 
 /// Every selected gate, in turn, with its line and evidence printed.
 fn run_each(
     runner: &dyn Runner,
     run: &GateRun<'_>,
-    units: &[Unit],
-    tool_errors: &[String],
+    measurements: &Measurements,
     out: &mut dyn Write,
     style: Style,
 ) -> Vec<GateResult> {
@@ -92,7 +85,7 @@ fn run_each(
     let mut results: Vec<GateResult> = Vec::new();
     for (position, gate) in run.gates.iter().enumerate() {
         announce(out, position + 1, total, width, gate.name(), style);
-        let result = run_one(runner, run, *gate, units, tool_errors);
+        let result = run_one(runner, run, *gate, measurements);
         print_result(out, position + 1, total, width, &result, style);
         results.push(result);
     }
@@ -104,8 +97,7 @@ fn run_one(
     runner: &dyn Runner,
     run: &GateRun<'_>,
     gate: Gate,
-    units: &[Unit],
-    tool_errors: &[String],
+    measurements: &Measurements,
 ) -> GateResult {
     let GateRun { target, config, .. } = *run;
 
@@ -125,8 +117,8 @@ fn run_one(
 
     match gate {
         Gate::Syntax => syntax::gate_syntax(runner, run),
-        Gate::Size => size::gate_size(runner, run, units, tool_errors),
-        Gate::Analysis => analysis::gate_analysis(run, units, tool_errors),
+        Gate::Size => size::gate_size(run, measurements),
+        Gate::Analysis => analysis::gate_analysis(run, measurements),
         Gate::Tests => suite::gate_tests(runner, run),
         Gate::Coverage => coverage::gate_coverage(runner, run),
         Gate::Mutation => mutation::gate_mutation(runner, run),

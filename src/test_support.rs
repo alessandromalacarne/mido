@@ -102,13 +102,6 @@ pub fn session_for(repo: &MiniRepo, config: Config) -> Session {
     }
 }
 
-/// Create an empty file at `path` under the fixture root, parents included.
-pub fn touch(repo: &MiniRepo, path: &str) {
-    let full = repo.root.join(path);
-    std::fs::create_dir_all(full.parent().expect("parent")).expect("dir");
-    std::fs::write(&full, "").expect("file");
-}
-
 /// Drive the binary's contract in-process: argv in, `(exit code, stdout, stderr)` out.
 pub fn run_cli(argv: &[&str], runner: &FakeRunner) -> (i32, String, String) {
     let args = crate::cli::parse_from(argv);
