@@ -19,6 +19,13 @@ pub fn as_float(value: &Value) -> Option<f64> {
     }
 }
 
+pub fn as_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Boolean(flag) => Some(*flag),
+        _ => None,
+    }
+}
+
 pub fn as_table(value: &Value) -> Option<&Table> {
     value.as_table()
 }
@@ -37,6 +44,14 @@ pub fn string_array(value: &Value) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_boolean_reads_as_a_switch() {
+        assert_eq!(as_bool(&Value::Boolean(true)), Some(true));
+        assert_eq!(as_bool(&Value::Boolean(false)), Some(false));
+        assert_eq!(as_bool(&Value::String("true".into())), None);
+        assert_eq!(as_bool(&Value::Integer(1)), None);
+    }
 
     #[test]
     fn integers_and_floats_read_as_numbers() {

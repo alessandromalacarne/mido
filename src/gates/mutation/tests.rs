@@ -3,6 +3,8 @@ use crate::report::{FAIL, PASS};
 use crate::test_support::{config_for, gate_run_for, MiniRepo};
 use stub::{write_pass, MutationStub, Pass};
 
+mod in_diff;
+mod judgment;
 mod passes;
 mod scopes;
 mod stub;
@@ -146,120 +148,6 @@ fn an_endless_run_times_out_as_incomplete() {
 
     assert_eq!(result.status, INCOMPLETE);
     assert!(result.summary.contains("timed out after 3600s"));
-}
-
-#[test]
-fn a_pass_that_wrote_no_report_is_incomplete() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![None]).answers(&[(
-        "cargo mutants",
-        0,
-        "cargo-mutants: nothing to do",
-    )]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(result.status, INCOMPLETE);
-    assert_eq!(result.summary, "cargo-mutants produced no report");
-    assert!(
-        result
-            .details
-            .iter()
-            .any(|line| line.contains("nothing to do")),
-        "the tool's own tail rides along: {:?}",
-        result.details
-    );
-}
-
-#[test]
-fn a_timed_out_mutant_is_incomplete() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 5,
-        caught: 4,
-        timeout: 1,
-        timed_out: vec!["src/foo.rs:9:9: replace a with b in slow"],
-        ..Pass::default()
-    })]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(result.status, INCOMPLETE, "a timeout is not a verdict");
-    assert!(
-        result
-            .summary
-            .contains("1 of 5 mutants produced no verdict"),
-        "{}",
-        result.summary
-    );
-    assert!(
-        result
-            .details
-            .iter()
-            .any(|line| line.starts_with("TIMEOUT  src/foo.rs:9:9")),
-        "{:?}",
-        result.details
-    );
-    assert!(
-        !result
-            .details
-            .iter()
-            .any(|line| line.contains("did not report an outcome")),
-        "every unresolved mutant was named: {:?}",
-        result.details
-    );
-}
-
-#[test]
-fn an_unclassified_mutant_is_incomplete() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 4,
-        caught: 2,
-        ..Pass::default()
-    })]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(
-        result.status, INCOMPLETE,
-        "a mutant the tool could not classify is no verdict"
-    );
-    assert!(
-        result
-            .summary
-            .contains("2 of 4 mutants produced no verdict"),
-        "{}",
-        result.summary
-    );
-    assert!(
-        result
-            .details
-            .iter()
-            .any(|line| line.contains("2 mutants did not report an outcome")),
-        "{:?}",
-        result.details
-    );
-}
-
-#[test]
-fn a_failed_baseline_is_incomplete() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 3,
-        caught: 3,
-        baseline_failure: Some("Failure"),
-        ..Pass::default()
-    })]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(result.status, INCOMPLETE);
-    assert!(
-        result.summary.contains("baseline") && result.summary.contains("Failure"),
-        "{}",
-        result.summary
-    );
 }
 
 #[test]

@@ -30,7 +30,13 @@ pub fn gate_keys(gate: &str) -> &'static [&'static str] {
         "analysis" => &["enabled", "tool", "mi_min", "cognitive_max"],
         "tests" => &["enabled", "command", "timeout_secs"],
         "coverage" => &["enabled", "command", "coverage_min", "total_drop_max"],
-        "mutation" => &["enabled", "command", "timeout_secs", "kill_rate_min"],
+        "mutation" => &[
+            "enabled",
+            "command",
+            "in_diff",
+            "timeout_secs",
+            "kill_rate_min",
+        ],
         _ => &[],
     }
 }

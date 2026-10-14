@@ -47,23 +47,57 @@ impl Default for Pass {
 pub(super) struct MutationStub {
     runner: FakeRunner,
     passes: RefCell<VecDeque<Option<Pass>>>,
+    /// The diff the gate's `git diff` call answers with.
+    diff: String,
+    /// The test's own needle answers, tried before the stub's.
+    custom: Vec<(String, i32, String)>,
 }
 
 impl MutationStub {
     pub(super) fn new(passes: Vec<Option<Pass>>) -> Self {
-        Self {
+        let mut stub = Self {
             runner: FakeRunner::default(),
             passes: RefCell::new(passes.into()),
-        }
+            diff: change_diff(&["src/foo.rs"]),
+            custom: Vec::new(),
+        };
+        stub.rebuild();
+        stub
     }
 
     pub(super) fn answers(mut self, responses: &[(&str, i32, &str)]) -> Self {
-        self.runner = FakeRunner::with(responses);
+        self.custom = responses
+            .iter()
+            .map(|(needle, code, output)| (needle.to_string(), *code, output.to_string()))
+            .collect();
+        self.rebuild();
         self
+    }
+
+    /// The change the stub says the run is scoped to: a diff touching `paths`.
+    pub(super) fn change(mut self, paths: &[&str]) -> Self {
+        self.diff = change_diff(paths);
+        self.rebuild();
+        self
+    }
+
+    /// The diff the gate reads back out of its `--in-diff` file.
+    pub(super) fn diff_text(&self) -> &str {
+        &self.diff
     }
 
     pub(super) fn called_with(&self, needle: &str) -> bool {
         self.runner.called_with(needle)
+    }
+
+    /// Whether some call's argv matches `args` exactly, argument by argument.
+    pub(super) fn called_exactly(&self, args: &[&str]) -> bool {
+        let expected: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+        self.runner
+            .calls
+            .borrow()
+            .iter()
+            .any(|call| call.args == expected)
     }
 
     /// The argv of every cargo-mutants pass, in order.
@@ -76,6 +110,33 @@ impl MutationStub {
             .map(|call| call.args.clone())
             .collect()
     }
+
+    /// Rebuild the runner: the test's answers first, then the stub's own.
+    fn rebuild(&mut self) {
+        let mut responses: Vec<(String, Outcome)> = self
+            .custom
+            .iter()
+            .map(|(needle, code, output)| (needle.clone(), Outcome::new(*code, output.clone(), "")))
+            .collect();
+        responses.push((
+            "git diff".to_string(),
+            Outcome::new(0, self.diff.clone(), ""),
+        ));
+        self.runner = FakeRunner {
+            responses,
+            ..FakeRunner::default()
+        };
+    }
+}
+
+/// The minimal unified diff a `git diff` would print for these paths.
+fn change_diff(paths: &[&str]) -> String {
+    paths
+        .iter()
+        .map(|path| {
+            format!("diff --git a/{path} b/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n")
+        })
+        .collect()
 }
 
 impl Runner for MutationStub {
