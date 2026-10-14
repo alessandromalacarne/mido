@@ -11,8 +11,6 @@
 pub mod javascript;
 pub mod node;
 pub mod rust;
-pub mod rust_code_analysis;
-pub mod tokei;
 pub mod typescript;
 
 use crate::error::GuardrailsError;
@@ -183,7 +181,7 @@ impl Lang {
     /// The `[size] tool` this module measures with.
     pub fn size_tool(self) -> &'static str {
         match self {
-            Lang::Rust => tokei::TOOL,
+            Lang::Rust => rust::SIZE_TOOL,
             Lang::TypeScript | Lang::JavaScript => node::eslint::TOOL,
         }
     }
@@ -191,7 +189,7 @@ impl Lang {
     /// The `[analysis] tool` this module measures with.
     pub fn metrics_tool(self) -> &'static str {
         match self {
-            Lang::Rust => rust_code_analysis::TOOL,
+            Lang::Rust => rust::METRICS_TOOL,
             Lang::TypeScript | Lang::JavaScript => node::eslint::TOOL,
         }
     }

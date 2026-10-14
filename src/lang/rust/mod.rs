@@ -3,18 +3,24 @@
 //! embedded rust baseline config.
 
 pub mod aid;
+pub mod code_analysis;
 pub mod coverage;
 pub mod diagnostics;
 pub mod metrics;
 pub mod mutation;
 pub mod suite;
 pub mod targets;
+pub mod tokei;
 
 pub const NAME: &str = "rust";
 pub const MANIFEST: &str = "Cargo.toml";
 pub const SOURCE_LABEL: &str = "rust";
 pub const SOURCE_EXT: &str = ".rs";
 pub const ENV_TOOL: &str = "cargo";
+/// The tools this module measures with: tokei counts the code lines, and
+/// rust-code-analysis reads the function metrics behind them.
+pub const SIZE_TOOL: &str = tokei::TOOL;
+pub const METRICS_TOOL: &str = code_analysis::TOOL;
 
 /// Whether a path is a rust source file.
 pub fn is_source(path: &str) -> bool {

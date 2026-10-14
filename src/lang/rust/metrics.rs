@@ -1,7 +1,7 @@
 //! The rust module's own measurement pass: tokei counts the code lines, and
 //! rust-code-analysis reads every function's metrics.
 
-use crate::lang::{rust_code_analysis, tokei};
+use crate::lang::rust::{code_analysis, tokei};
 use crate::metrics::Measurements;
 use crate::process::Runner;
 use crate::targets::Target;
@@ -30,7 +30,7 @@ pub fn measure(
         probe_tool,
         &mut measurements.errors,
     );
-    measurements.units = rust_code_analysis::analysis_units(
+    measurements.units = code_analysis::analysis_units(
         runner,
         repo,
         target,
