@@ -44,6 +44,7 @@
             cargo-mutants
             cargo-nextest
             llvmPackages.llvm
+            nodejs_22
           ];
 
           # cargo-llvm-cov looks for llvm-tools-preview inside the toolchain;
