@@ -43,11 +43,11 @@ fn the_target_table_aligns_on_its_widest_name() {
     let targets = BTreeMap::from([
         (
             "a-very-long-target-name".to_string(),
-            Target::crate_target("a-very-long-target-name", false, "Cargo.toml"),
+            Target::package_target("a-very-long-target-name", false, "Cargo.toml"),
         ),
         (
             "api".to_string(),
-            Target::crate_target("api", false, "Cargo.toml"),
+            Target::package_target("api", false, "Cargo.toml"),
         ),
     ]);
     let mut out = Vec::new();

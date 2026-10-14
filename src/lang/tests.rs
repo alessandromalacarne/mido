@@ -28,7 +28,7 @@ fn a_target_setup_check_is_delegated_to_the_module() {
 
     let repo = MiniRepo::build(None);
     std::fs::remove_file(repo.root.join("frontend/Cargo.toml")).expect("manifest removed");
-    let target = Target::crate_target("frontend", false, "Cargo.toml");
+    let target = Target::package_target("frontend", false, "Cargo.toml");
 
     let error = Lang::Rust
         .validate_target_setup(

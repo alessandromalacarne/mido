@@ -94,18 +94,6 @@ fn mutation_passes(
         .argv("mutation", "command", run.target)
         .or_else(|| lang.fallback_argv("mutation", "command"))
         .unwrap_or_default();
-    if names_own_output(&base) {
-        return Err(GuardrailsError::setup(
-            "the configured mutation command names its own --output",
-        )
-        .detail(
-            "mido owns the mutation state: a verdict may only be decided by the \
-             mutants a run itself started",
-        )
-        .hint(
-            "drop --output from [mutation] command — mido writes into its own scratch directory",
-        ));
-    }
 
     let mut driven: Vec<Vec<String>> = Vec::new();
     let mut passes: Vec<MutationPass> = Vec::new();
@@ -117,13 +105,13 @@ fn mutation_passes(
         }
 
         let iterate = !passes.is_empty();
-        let args = pass_args(&base, &test_args, iterate, output, lang);
+        let args = lang.mutation_pass_args(&base, &test_args, iterate, output)?;
         passes.push(MutationPass { command, args });
         driven.push(test_args);
     }
 
     if passes.is_empty() {
-        let args = pass_args(&base, &[], false, output, lang);
+        let args = lang.mutation_pass_args(&base, &[], false, output)?;
         passes.push(MutationPass {
             command: Vec::new(),
             args,
@@ -131,37 +119,6 @@ fn mutation_passes(
     }
 
     Ok(passes)
-}
-
-/// Whether the configured command names its own output directory — in any of
-/// the forms cargo-mutants' parser accepts.
-fn names_own_output(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg.starts_with("-o") || arg.starts_with("--output"))
-}
-
-/// One pass's argv: the configured command, timed, carrying the run's output
-/// directory and the test arguments of the suite it drives.
-fn pass_args(
-    base: &[String],
-    test_args: &[String],
-    iterate: bool,
-    output: &Path,
-    lang: Lang,
-) -> Vec<String> {
-    let mut args = base.to_vec();
-    if iterate && !args.iter().any(|arg| arg == "--iterate") {
-        args.push("--iterate".to_string());
-    }
-    args.push("--output".to_string());
-    args.push(output.to_string_lossy().to_string());
-    args.push("--timeout".to_string());
-    args.push(lang.mutation_timeout().to_string());
-    if !test_args.is_empty() {
-        args.push("--".to_string());
-        args.extend(test_args.iter().cloned());
-    }
-    args
 }
 
 /// The verdict for a command mido cannot drive: INCOMPLETE, never a pass.

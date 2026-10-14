@@ -3,6 +3,7 @@
 
 use crate::lang::StepOutcome;
 use regex::Regex;
+use std::path::Path;
 use std::sync::OnceLock;
 
 fn format_pattern() -> &'static Regex {
@@ -21,8 +22,15 @@ fn severity_pattern() -> &'static Regex {
 }
 
 /// One syntax step's outcome, picked by the step's name (`command` and lint
-/// steps report diagnostics; `format` reports diffs).
-pub fn syntax_outcome(step: &str, command: &str, output: &str, returncode: i32) -> StepOutcome {
+/// steps report diagnostics; `format` reports diffs). Rustc prints its paths
+/// relative to where the step ran, so the work dir is not needed.
+pub fn syntax_outcome(
+    step: &str,
+    command: &str,
+    output: &str,
+    returncode: i32,
+    _work_dir: &Path,
+) -> StepOutcome {
     if step == "format" {
         format_step(output)
     } else {
@@ -174,6 +182,7 @@ mod tests {
             "cargo fmt --check",
             "Diff in src/foo.rs:3:\nDiff in src/bar.rs:1:\n",
             1,
+            Path::new("."),
         );
 
         assert_eq!(outcome.problems.len(), 2);
@@ -183,7 +192,7 @@ mod tests {
 
     #[test]
     fn a_clean_format_pass_has_nothing_to_report() {
-        let outcome = syntax_outcome("format", "cargo fmt --check", "", 0);
+        let outcome = syntax_outcome("format", "cargo fmt --check", "", 0, Path::new("."));
 
         assert!(outcome.problems.is_empty());
         assert!(outcome.details[0].contains("0 file(s) with diffs"));
@@ -211,6 +220,7 @@ mod tests {
             "cargo clippy",
             "warning: unused\n  --> src/foo.rs:1:1\nwarning: old\n  --> src/old.rs:2:2\n",
             1,
+            Path::new("."),
         );
 
         assert_eq!(outcome.problems.len(), 2);
@@ -224,6 +234,7 @@ mod tests {
             "cargo clippy",
             "error: could not compile `mido`\n",
             101,
+            Path::new("."),
         );
 
         assert_eq!(outcome.problems.len(), 1);
@@ -241,6 +252,7 @@ mod tests {
             "cargo check",
             "warning: pre-existing\n  --> src/old.rs:2:2\n",
             0,
+            Path::new("."),
         );
 
         assert_eq!(

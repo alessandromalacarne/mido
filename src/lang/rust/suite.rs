@@ -170,7 +170,7 @@ mod tests {
         ",
         ));
         let config = config_for(&repo);
-        let frontend = Target::crate_target("frontend", false, crate::lang::rust::MANIFEST);
+        let frontend = Target::package_target("frontend", false, crate::lang::rust::MANIFEST);
 
         assert_eq!(
             test_commands(&config, &frontend, &repo.root),
@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(
             test_commands(
                 &config,
-                &Target::crate_target("desktop", false, crate::lang::rust::MANIFEST),
+                &Target::package_target("desktop", false, crate::lang::rust::MANIFEST),
                 &repo.root
             ),
             vec![argv(&["cargo", "test"])]
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(
             test_commands(
                 &config,
-                &Target::crate_target("frontend", false, crate::lang::rust::MANIFEST),
+                &Target::package_target("frontend", false, crate::lang::rust::MANIFEST),
                 &repo.root
             ),
             vec![
@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(
             test_commands(
                 &config_for(&repo),
-                &Target::crate_target("desktop", false, crate::lang::rust::MANIFEST),
+                &Target::package_target("desktop", false, crate::lang::rust::MANIFEST),
                 &repo.root
             ),
             vec![argv(&["cargo", "test"])]
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(
             test_commands(
                 &config_for(&repo),
-                &Target::crate_target("frontend", false, crate::lang::rust::MANIFEST),
+                &Target::package_target("frontend", false, crate::lang::rust::MANIFEST),
                 &repo.root
             ),
             vec![argv(&["cargo", "test"])]

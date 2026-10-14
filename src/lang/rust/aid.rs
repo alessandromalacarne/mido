@@ -105,7 +105,7 @@ pub fn validate_target_setup(
     apply_aid: bool,
     out: &mut dyn Write,
 ) -> Result<(), GuardrailsError> {
-    ensure_manifest(repo, target)?;
+    crate::lang::ensure_manifest(repo, target)?;
 
     if target.workspace_member || target.path.is_empty() {
         return Ok(());
@@ -123,22 +123,6 @@ pub fn validate_target_setup(
         return Ok(());
     }
     Err(aid_needed_error(target, &probe))
-}
-
-fn ensure_manifest(repo: &Path, target: &Target) -> Result<(), GuardrailsError> {
-    let Some(manifest) = &target.manifest else {
-        return Ok(());
-    };
-    let path = repo.join(manifest);
-    if path.exists() {
-        return Ok(());
-    }
-
-    Err(
-        GuardrailsError::setup(format!("target `{}` has no manifest", target.name))
-            .detail(format!("looked for {}", path.display()))
-            .hint("pass --list-targets to see what can be measured"),
-    )
 }
 
 fn cargo_missing_error(probe: &Outcome) -> GuardrailsError {

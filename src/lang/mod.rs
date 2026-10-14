@@ -2,10 +2,13 @@
 //!
 //! The ladder is generic; everything stack-specific — default commands, output
 //! parsers, target detection, the environment probe — lives in a module under
-//! this one. The module a run uses is inferred from the repo unless `--lang`
-//! names it explicitly.
+//! this one. The tool integrations more than one module drives (tokei,
+//! rust-code-analysis) live at this level, beside them. The module a run uses
+//! is inferred from the repo unless `--lang` names it explicitly.
 
 pub mod rust;
+pub mod rust_code_analysis;
+pub mod tokei;
 
 use crate::error::GuardrailsError;
 use std::path::Path;
@@ -104,9 +107,12 @@ impl Lang {
         command: &str,
         output: &str,
         returncode: i32,
+        work_dir: &Path,
     ) -> StepOutcome {
         match self {
-            Lang::Rust => rust::diagnostics::syntax_outcome(step, command, output, returncode),
+            Lang::Rust => {
+                rust::diagnostics::syntax_outcome(step, command, output, returncode, work_dir)
+            }
         }
     }
 
@@ -127,9 +133,14 @@ impl Lang {
         files: &[String],
         on_error: &mut Vec<String>,
     ) -> Vec<crate::metrics::Unit> {
-        match self {
-            Lang::Rust => rust::analysis::analysis_units(runner, repo, target, files, on_error),
-        }
+        rust_code_analysis::analysis_units(
+            runner,
+            repo,
+            target,
+            files,
+            self.env_tool(),
+            on_error,
+        )
     }
 
     /// The code lines per file the size gate judges.
@@ -142,23 +153,17 @@ impl Lang {
         tool: &str,
         on_error: &mut Vec<String>,
     ) -> std::collections::BTreeMap<String, i64> {
-        match self {
-            Lang::Rust => rust::size::code_lines(runner, repo, target, files, tool, on_error),
-        }
+        tokei::code_lines(runner, repo, target, files, tool, self.env_tool(), on_error)
     }
 
     /// The `[size] tool` this module drives by default.
     pub fn size_tool(self) -> &'static str {
-        match self {
-            Lang::Rust => rust::size::TOOL,
-        }
+        tokei::TOOL
     }
 
     /// The tool that produces the function metrics both size and analysis judge.
     pub fn metrics_tool(self) -> &'static str {
-        match self {
-            Lang::Rust => rust::METRICS_TOOL,
-        }
+        rust_code_analysis::TOOL
     }
 
     /// The commands the tests gate runs for a target, in order.
@@ -208,10 +213,19 @@ impl Lang {
         }
     }
 
-    /// The per-mutant timeout argument value.
-    pub fn mutation_timeout(self) -> i64 {
+    /// One mutation pass's argv: the configured command plus what the module's
+    /// mutation tool needs to run under mido's own output directory, carrying
+    /// the test arguments of the suite the pass drives. A command that names
+    /// its own output is a conflict the module refuses.
+    pub fn mutation_pass_args(
+        self,
+        base: &[String],
+        test_args: &[String],
+        iterate: bool,
+        output: &Path,
+    ) -> Result<Vec<String>, GuardrailsError> {
         match self {
-            Lang::Rust => rust::mutation::TIMEOUT_SECS,
+            Lang::Rust => rust::mutation::pass_args(base, test_args, iterate, output),
         }
     }
 
@@ -274,6 +288,27 @@ impl Lang {
             Lang::Rust => rust::no_targets_error(repo),
         }
     }
+}
+
+/// The manifest a target names, or the setup error a run gets when it is gone —
+/// one check every module's target validation starts with.
+pub(crate) fn ensure_manifest(
+    repo: &Path,
+    target: &crate::targets::Target,
+) -> Result<(), GuardrailsError> {
+    let Some(manifest) = &target.manifest else {
+        return Ok(());
+    };
+    let path = repo.join(manifest);
+    if path.exists() {
+        return Ok(());
+    }
+
+    Err(
+        GuardrailsError::setup(format!("target `{}` has no manifest", target.name))
+            .detail(format!("looked for {}", path.display()))
+            .hint("pass --list-targets to see what can be measured"),
+    )
 }
 
 #[cfg(test)]

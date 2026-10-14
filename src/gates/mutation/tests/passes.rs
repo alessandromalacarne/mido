@@ -16,7 +16,7 @@ fn browser_tested_frontend(repo: &MiniRepo) {
 /// A gate run over the standalone `frontend` crate — the shape whose target
 /// declares more than one test command.
 fn frontend_run<'a>(repo: &'a MiniRepo, config: &'a Config, files: &'a [String]) -> GateRun<'a> {
-    let target = Box::leak(Box::new(crate::targets::Target::crate_target(
+    let target = Box::leak(Box::new(crate::targets::Target::package_target(
         "frontend",
         false,
         crate::lang::rust::MANIFEST,

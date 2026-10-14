@@ -1,11 +1,9 @@
 //! The rust module: cargo targets, rustc/clippy diagnostics, libtest output,
-//! cargo-mutants, rust-code-analysis — and the embedded rust baseline config.
+//! cargo-mutants — and the embedded rust baseline config.
 
 pub mod aid;
-pub mod analysis;
 pub mod diagnostics;
 pub mod mutation;
-pub mod size;
 pub mod suite;
 pub mod targets;
 
@@ -14,7 +12,6 @@ pub const MANIFEST: &str = "Cargo.toml";
 pub const SOURCE_LABEL: &str = "rust";
 pub const SOURCE_EXT: &str = ".rs";
 pub const ENV_TOOL: &str = "cargo";
-pub const METRICS_TOOL: &str = "rust-code-analysis";
 
 /// Whether a path is a rust source file.
 pub fn is_source(path: &str) -> bool {

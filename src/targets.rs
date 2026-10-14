@@ -1,14 +1,15 @@
 //! What a run is scoped to: the workspace, or one package of it.
 
 use crate::config::{value, Config};
+use crate::error::GuardrailsError;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     pub name: String,
-    /// The cargo package name its manifest declares; `None` for the roll-up
-    /// and for declared targets that are not crates.
+    /// The package name its manifest declares (the cargo package, the npm
+    /// package); `None` for the roll-up and for declared targets that have none.
     pub package: Option<String>,
     pub path: String,
     pub manifest: Option<String>,
@@ -43,12 +44,12 @@ impl Target {
         }
     }
 
-    pub fn crate_target(crate_name: &str, member: bool, manifest: &str) -> Self {
+    pub fn package_target(dir: &str, member: bool, manifest: &str) -> Self {
         Self {
-            name: crate_name.to_string(),
+            name: dir.to_string(),
             package: None,
-            path: crate_name.to_string(),
-            manifest: Some(format!("{crate_name}/{manifest}")),
+            path: dir.to_string(),
+            manifest: Some(format!("{dir}/{manifest}")),
             workspace_member: member,
         }
     }
@@ -57,6 +58,41 @@ impl Target {
         self.package = package;
         self
     }
+}
+
+/// Resolve a `-p` spec against a detected target set: by target name first,
+/// then by the package name the manifest declares. A name no target answers to
+/// is a setup error — never a silent whole-workspace run.
+pub fn resolve_named(
+    targets: &BTreeMap<String, Target>,
+    spec: &str,
+) -> Result<Target, GuardrailsError> {
+    if let Some(target) = targets.get(spec) {
+        return Ok(target.clone());
+    }
+    if let Some(target) = targets
+        .values()
+        .find(|target| target.package.as_deref() == Some(spec))
+    {
+        return Ok(target.clone());
+    }
+
+    Err(unknown_package_error(spec, targets))
+}
+
+fn unknown_package_error(spec: &str, targets: &BTreeMap<String, Target>) -> GuardrailsError {
+    let mut known: Vec<String> = targets
+        .values()
+        .map(|target| match &target.package {
+            Some(package) if *package != target.name => format!("{} ({package})", target.name),
+            _ => target.name.clone(),
+        })
+        .collect();
+    known.sort();
+
+    GuardrailsError::setup(format!("package `{spec}` not found in this workspace"))
+        .detail(format!("known names: {}", known.join(", ")))
+        .hint("pass a package name, or run without -p to measure the whole workspace")
 }
 
 /// `[targets.<name>]` sections: the repo's own way to name a case. The module
