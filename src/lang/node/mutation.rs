@@ -83,18 +83,18 @@ pub fn pass_args(
     in_diff: Option<&Path>,
 ) -> Result<Vec<String>, GuardrailsError> {
     if let Some(diff) = in_diff {
-        return Err(GuardrailsError::setup(
-            "the javascript module has no change scope for stryker",
-        )
-        .detail(format!(
-            "the run was asked to read {}, but stryker scopes its sweep through the \
+        return Err(
+            GuardrailsError::setup("this module has no change scope for stryker")
+                .detail(format!(
+                    "the run was asked to read {}, but stryker scopes its sweep through the \
              mutate globs in its own config — a diff scope is not wired yet",
-            diff.display()
-        ))
-        .hint(
-            "set `in_diff = false` in [mutation] (the javascript default) to sweep the \
+                    diff.display()
+                ))
+                .hint(
+                    "set `in_diff = false` in [mutation] (the module default) to sweep the \
              whole package",
-        ));
+                ),
+        );
     }
     if names_own_config(base) {
         return Err(GuardrailsError::setup(

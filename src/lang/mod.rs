@@ -2,11 +2,14 @@
 //!
 //! The ladder is generic; everything stack-specific — default commands, output
 //! parsers, target detection, the environment probe — lives in a module under
-//! this one. The tool integrations more than one module drives (tokei,
-//! rust-code-analysis) live at this level, beside them. The module a run uses
-//! is inferred from the repo unless `--lang` names it explicitly.
+//! this one. What more than one module drives lives at this level, beside
+//! them: the tool integrations (`tokei`, `rust-code-analysis`) and the node
+//! ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc
+//! parsing, the package manager's test runners, stryker). The module a run
+//! uses is inferred from the repo unless `--lang` names it explicitly.
 
 pub mod javascript;
+pub mod node;
 pub mod rust;
 pub mod rust_code_analysis;
 pub mod tokei;
@@ -119,7 +122,7 @@ impl Lang {
     pub fn fallback_argv(self, gate: &str, key: &str) -> Option<Vec<String>> {
         match self {
             Lang::Rust => rust::fallback_argv(gate, key),
-            Lang::JavaScript => javascript::fallback_argv(gate, key),
+            Lang::JavaScript => node::fallback_argv(gate, key),
         }
     }
 
@@ -137,7 +140,7 @@ impl Lang {
                 rust::diagnostics::syntax_outcome(step, command, output, returncode, work_dir)
             }
             Lang::JavaScript => {
-                javascript::diagnostics::syntax_outcome(step, command, output, returncode, work_dir)
+                node::diagnostics::syntax_outcome(step, command, output, returncode, work_dir)
             }
         }
     }
@@ -147,7 +150,7 @@ impl Lang {
     pub fn dedupe_problems(self, problems: &[String]) -> Vec<String> {
         match self {
             Lang::Rust => rust::diagnostics::dedupe_problems(problems),
-            Lang::JavaScript => javascript::diagnostics::dedupe_problems(problems),
+            Lang::JavaScript => node::diagnostics::dedupe_problems(problems),
         }
     }
 
@@ -195,7 +198,7 @@ impl Lang {
     ) -> Vec<Vec<String>> {
         match self {
             Lang::Rust => rust::suite::test_commands(config, target, repo),
-            Lang::JavaScript => javascript::suite::test_commands(config, target, repo),
+            Lang::JavaScript => node::suite::test_commands(config, target, repo),
         }
     }
 
@@ -203,7 +206,7 @@ impl Lang {
     pub fn test_summary(self, output: &str) -> Option<TestSummary> {
         match self {
             Lang::Rust => rust::suite::test_summary(output),
-            Lang::JavaScript => javascript::suite::test_summary(output),
+            Lang::JavaScript => node::suite::test_summary(output),
         }
     }
 
@@ -235,7 +238,7 @@ impl Lang {
     pub fn mutation_tool(self) -> &'static str {
         match self {
             Lang::Rust => rust::mutation::TOOL,
-            Lang::JavaScript => javascript::mutation::TOOL,
+            Lang::JavaScript => node::mutation::TOOL,
         }
     }
 
@@ -244,7 +247,7 @@ impl Lang {
     pub fn mutation_prepare(self, output: &Path, work_dir: &Path) -> Result<(), GuardrailsError> {
         match self {
             Lang::Rust => Ok(()),
-            Lang::JavaScript => javascript::mutation::prepare(output, work_dir),
+            Lang::JavaScript => node::mutation::prepare(output, work_dir),
         }
     }
 
@@ -264,7 +267,7 @@ impl Lang {
         match self {
             Lang::Rust => rust::mutation::pass_args(base, test_args, iterate, output, in_diff),
             Lang::JavaScript => {
-                javascript::mutation::pass_args(base, test_args, iterate, output, in_diff)
+                node::mutation::pass_args(base, test_args, iterate, output, in_diff)
             }
         }
     }
@@ -274,7 +277,7 @@ impl Lang {
     pub fn mutation_report(self, output_dir: &Path) -> Option<MutationReport> {
         match self {
             Lang::Rust => rust::mutation::report::read(output_dir),
-            Lang::JavaScript => javascript::mutation::report::read(output_dir),
+            Lang::JavaScript => node::mutation::report::read(output_dir),
         }
     }
 
@@ -284,7 +287,7 @@ impl Lang {
         match self {
             Lang::Rust => rust::mutation::found_nothing(output),
             // Stryker prints no such signal, and the change scope is not wired
-            // for javascript yet: its sweep is the whole package.
+            // for the node modules yet: their sweep is the whole package.
             Lang::JavaScript => false,
         }
     }
@@ -294,7 +297,7 @@ impl Lang {
     pub fn mutation_test_args(self, command: &[String]) -> Option<Vec<String>> {
         match self {
             Lang::Rust => rust::mutation::test_args(command),
-            Lang::JavaScript => javascript::mutation::test_args(command),
+            Lang::JavaScript => node::mutation::test_args(command),
         }
     }
 
@@ -306,7 +309,7 @@ impl Lang {
     ) -> std::collections::BTreeMap<String, crate::targets::Target> {
         match self {
             Lang::Rust => rust::targets::detect_targets(repo, config),
-            Lang::JavaScript => javascript::targets::detect_targets(repo, config),
+            Lang::JavaScript => node::targets::detect_targets(repo, config),
         }
     }
 
@@ -319,7 +322,7 @@ impl Lang {
     ) -> Result<crate::targets::Target, GuardrailsError> {
         match self {
             Lang::Rust => rust::targets::resolve_package(repo, config, spec),
-            Lang::JavaScript => javascript::targets::resolve_package(repo, config, spec),
+            Lang::JavaScript => node::targets::resolve_package(repo, config, spec),
         }
     }
 
@@ -334,9 +337,7 @@ impl Lang {
     ) -> Result<(), GuardrailsError> {
         match self {
             Lang::Rust => rust::aid::validate_target_setup(runner, repo, target, apply_aid, out),
-            Lang::JavaScript => {
-                javascript::validate_target_setup(runner, repo, target, apply_aid, out)
-            }
+            Lang::JavaScript => ensure_manifest(repo, target),
         }
     }
 
@@ -344,7 +345,7 @@ impl Lang {
     pub fn no_targets_error(self, repo: &Path) -> GuardrailsError {
         match self {
             Lang::Rust => rust::no_targets_error(repo),
-            Lang::JavaScript => javascript::no_targets_error(repo),
+            Lang::JavaScript => node::no_targets_error(repo),
         }
     }
 }

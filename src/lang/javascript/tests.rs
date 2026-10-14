@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::validate::validate_config;
 use crate::lang::Lang;
+use crate::targets::Target;
 use crate::test_support::{FakeRunner, MiniJsRepo};
 use std::path::Path;
 
@@ -116,14 +117,15 @@ fn a_missing_manifest_is_a_setup_error() {
     std::fs::remove_file(repo.root.join("standalone/package.json")).expect("manifest removed");
     let target = Target::package_target("standalone", false, MANIFEST);
 
-    let error = validate_target_setup(
-        &FakeRunner::default(),
-        &repo.root,
-        &target,
-        false,
-        &mut Vec::new(),
-    )
-    .expect_err("the missing manifest must surface through the module");
+    let error = Lang::JavaScript
+        .validate_target_setup(
+            &FakeRunner::default(),
+            &repo.root,
+            &target,
+            false,
+            &mut Vec::new(),
+        )
+        .expect_err("the missing manifest must surface through the module");
 
     assert!(error.render().contains("has no manifest"));
 }
@@ -133,21 +135,22 @@ fn a_present_manifest_validates_and_needs_no_aid() {
     let repo = MiniJsRepo::build(None);
     let target = Target::package_target("standalone", false, MANIFEST);
 
-    validate_target_setup(
-        &FakeRunner::default(),
-        &repo.root,
-        &target,
-        true,
-        &mut Vec::new(),
-    )
-    .expect("a present manifest is enough");
+    Lang::JavaScript
+        .validate_target_setup(
+            &FakeRunner::default(),
+            &repo.root,
+            &target,
+            true,
+            &mut Vec::new(),
+        )
+        .expect("a present manifest is enough");
 }
 
 #[test]
 fn no_targets_error_names_what_the_ladder_measures() {
     let repo = MiniJsRepo::build(None);
 
-    let message = no_targets_error(&repo.root).render();
+    let message = Lang::JavaScript.no_targets_error(&repo.root).render();
 
     assert!(message.contains("no npm package found"), "{message}");
     assert!(message.contains("package.json"), "{message}");
