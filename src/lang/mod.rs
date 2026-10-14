@@ -1,18 +1,16 @@
 //! Language modules.
 //!
 //! The ladder is generic; everything stack-specific — default commands, output
-//! parsers, target detection, the environment probe — lives in a module under
-//! this one. What more than one module drives lives at this level, beside
-//! them: the tool integrations (`tokei`, `rust-code-analysis`) and the node
-//! ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc
-//! parsing, the package manager's test runners, stryker). The module a run
-//! uses is inferred from the repo unless `--lang` names it explicitly.
+//! parsers, target detection, the environment probe, the measurement pass —
+//! lives in a module under this one. Each module carries its own tools: the
+//! rust module measures with tokei and rust-code-analysis, the node modules
+//! with eslint. Sharing an integration is a module's choice, never the shape
+//! of the seam. The module a run uses is inferred from the repo unless
+//! `--lang` names it explicitly.
 
 pub mod javascript;
 pub mod node;
 pub mod rust;
-pub mod rust_code_analysis;
-pub mod tokei;
 pub mod typescript;
 
 use crate::error::GuardrailsError;
@@ -161,39 +159,39 @@ impl Lang {
         }
     }
 
-    /// Measure the function metrics the size and analysis gates judge.
-    pub fn analysis_units(
+    /// Measure what the size and analysis gates judge. Every module names its
+    /// own tools here; two modules sharing one is a coincidence, not the
+    /// shape of the seam.
+    pub fn measure(
         self,
         runner: &dyn crate::process::Runner,
         repo: &Path,
         target: &crate::targets::Target,
         files: &[String],
-        on_error: &mut Vec<String>,
-    ) -> Vec<crate::metrics::Unit> {
-        rust_code_analysis::analysis_units(runner, repo, target, files, self.env_tool(), on_error)
+    ) -> crate::metrics::Measurements {
+        let probe_tool = self.env_tool();
+        match self {
+            Lang::Rust => rust::metrics::measure(runner, repo, target, files, probe_tool),
+            Lang::TypeScript | Lang::JavaScript => {
+                node::eslint::measure(runner, repo, target, files, probe_tool)
+            }
+        }
     }
 
-    /// The code lines per file the size gate judges.
-    pub fn code_lines(
-        self,
-        runner: &dyn crate::process::Runner,
-        repo: &Path,
-        target: &crate::targets::Target,
-        files: &[String],
-        tool: &str,
-        on_error: &mut Vec<String>,
-    ) -> std::collections::BTreeMap<String, i64> {
-        tokei::code_lines(runner, repo, target, files, tool, self.env_tool(), on_error)
-    }
-
-    /// The `[size] tool` this module drives by default.
+    /// The `[size] tool` this module measures with.
     pub fn size_tool(self) -> &'static str {
-        tokei::TOOL
+        match self {
+            Lang::Rust => rust::SIZE_TOOL,
+            Lang::TypeScript | Lang::JavaScript => node::eslint::TOOL,
+        }
     }
 
-    /// The tool that produces the function metrics both size and analysis judge.
+    /// The `[analysis] tool` this module measures with.
     pub fn metrics_tool(self) -> &'static str {
-        rust_code_analysis::TOOL
+        match self {
+            Lang::Rust => rust::METRICS_TOOL,
+            Lang::TypeScript | Lang::JavaScript => node::eslint::TOOL,
+        }
     }
 
     /// The commands the tests gate runs for a target, in order.

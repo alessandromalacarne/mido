@@ -12,7 +12,9 @@ pub struct Unit {
     pub cyclomatic: i64,
     pub cognitive: i64,
     pub nesting: Option<i64>,
-    pub mi: f64,
+    /// The maintainability index, where the module's tool computes one — a
+    /// reading that never arrived is absent, never a 100.
+    pub mi: Option<f64>,
 }
 
 impl Unit {
@@ -24,9 +26,25 @@ impl Unit {
             cyclomatic: 0,
             cognitive: 0,
             nesting: None,
-            mi: 100.0,
+            mi: None,
         }
     }
+}
+
+/// Every reading one measurement pass produced: the per-file counts, the
+/// per-function units, and what could not be read. Each module measures with
+/// its own tool; the gates only judge what a pass answered.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Measurements {
+    /// The source files the pass was asked to read.
+    pub files: Vec<String>,
+    /// Code lines per file.
+    pub lines: BTreeMap<String, i64>,
+    /// The deepest block nesting per file, where that is how the tool reports it.
+    pub nesting: BTreeMap<String, i64>,
+    pub units: Vec<Unit>,
+    /// What could not be measured — never a zero, never a pass.
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -90,16 +90,16 @@ project built with LLMs should not ship below. Start by copying this repo's
 | # | Gate | What it enforces | Tooling (rust · typescript · javascript) |
 |---|------|------------------|------------------------------------------|
 | 1 | `syntax` | formatter, linter, type checker pass on the measured target | rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` · typescript: `prettier --check`, `eslint`, `tsc --noEmit` · javascript: `prettier --check`, `eslint` (all argv configurable) |
-| 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | `tokei` + `rust-code-analysis`, every module |
-| 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis`, every module |
+| 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | rust: `tokei` + `rust-code-analysis` · typescript/javascript: `eslint` (`max-lines`, `max-lines-per-function`, `complexity`, `max-depth`) |
+| 3 | `analysis` | cognitive complexity ceiling, and a maintainability index floor where the stack measures one | rust: `rust-code-analysis` · typescript/javascript: `eslint` (`sonarjs/cognitive-complexity`) |
 | 4 | `tests` | the test command passes | rust: `cargo test` · typescript/javascript: the package manager's `test` script (lockfile-detected) |
 | 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | rust: `cargo llvm-cov` · typescript/javascript: the devDependencies' own runner — vitest or jest — else `c8` (lcov) |
 | 6 | `mutation` | percentage of mutants killed in the change — the whole package with `in_diff = false`, the node modules' default | rust: `cargo-mutants` · typescript/javascript: `stryker` |
 
 Built-in defaults, all overridable in `.mido.toml`:
 
-- **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4
-- **analysis** — maintainability index ≥ 20; cognitive complexity ≤ 15
+- **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4 (deepest block per file where the module's tool counts blocks rather than functions)
+- **analysis** — cognitive complexity ≤ 15; maintainability index ≥ 20 in the kernels that measure one (rust)
 - **coverage** — total ≥ 80%; drop ≤ 0 points
 - **mutation** — kill rate ≥ 70%; scoped to the change for rust, the whole package for the node modules (see below)
 - **timeouts** — syntax 1800s, tests 900s, mutation 3600s
@@ -108,7 +108,14 @@ The typescript and javascript baselines carry the same thresholds; they differ
 in their commands: `prettier`/`eslint` for syntax (plus `tsc --noEmit` for
 typescript), the lockfile-detected `<package manager> test` for the suite, the
 devDependencies' own coverage runner — vitest or jest, else `c8` — and `stryker`
-for mutation.
+for mutation. They also measure with what the repo already has: the size and
+analysis readings come from eslint, so no extra tool is needed.
+
+Each language module names the tool it measures with — rust reads tokei and
+rust-code-analysis, the node modules read eslint — and `[size] tool` /
+`[analysis] tool` are checked against that name: a config pointing a module at a
+tool it cannot drive is `INCOMPLETE` with a pointer, never a silent measurement
+with something else.
 
 ## Verdicts and exit codes
 
@@ -200,10 +207,11 @@ built-in baseline (`src/lang/rust/defaults.toml`) expects these on `PATH`:
 | `mutation` | `cargo mutants` | `cargo install cargo-mutants`; add `cargo-nextest` for the recommended `test_tool = "nextest"` setup |
 
 Every command is an argv array in `.mido.toml`, so pointing a gate at a
-different tool is a config edit, not a code change. A missing tool never passes
-a gate: the command cannot run, the gate reports `INCOMPLETE`, and the run
-exits `2`. Install the tool — or work inside `nix develop`, whose dev shell
-carries all of them.
+different tool is a config edit, not a code change — the exception is the
+measurement behind `size` and `analysis`, which each language module
+implements. A missing tool never passes a gate: the command cannot run, the
+gate reports `INCOMPLETE`, and the run exits `2`. Install the tool — or work
+inside `nix develop`, whose dev shell carries all of them.
 
 The typescript and javascript baselines
 (`src/lang/{typescript,javascript}/defaults.toml`) call the project's own
@@ -212,7 +220,7 @@ devDependencies, through `npx --no-install` — never a network install:
 | Gate | Tools the baseline calls | Where they come from |
 |------|--------------------------|----------------------|
 | `syntax` | `prettier`, `eslint`, and `tsc --noEmit` for typescript | the project's devDependencies |
-| `size` / `analysis` | `tokei`, `rust-code-analysis` | the dev shell; both parse javascript and typescript (`.ts`/`.tsx`) |
+| `size` / `analysis` | `eslint`, with the metric rules injected and read back | the project's devDependencies: `max-lines`, `max-lines-per-function`, `complexity` and `max-depth` are eslint core, and the cognitive ceiling needs `eslint-plugin-sonarjs` loaded by the repo's own config — without it the pass fails loudly rather than measuring nothing |
 | `tests` | `<package manager> test` | the lockfile (`pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `package-lock.json`) picks the manager; npm when there is none |
 | `coverage` | `vitest --coverage`, `jest --coverage`, or `c8` | derived from the devDependencies — vitest's or jest's own coverage when one is named, else `c8` wrapping the test script; all of them write `lcov.info` where the gate reads it |
 | `mutation` | `stryker` | the project's devDependencies; mido extends the repo's `stryker.config.*` with its own report path |
@@ -338,15 +346,15 @@ lint      = ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "
 typecheck = ["cargo", "check"]
 
 [size]
-tool         = "tokei"                          # tokei is the supported tool
+tool         = "tokei"                          # the rust module measures with tokei
 file_loc     = { warn = 300, fail = 500 }       # non-blank, non-comment lines per file
 function_loc = { warn = 40,  fail = 60  }       # lines per function
-complexity   = { warn = 10,  fail = 15  }       # cyclomatic or cognitive, per function
+complexity   = { warn = 10,  fail = 15  }       # cyclomatic complexity, per function
 nesting      = { warn = 3,   fail = 4   }       # deepest block nesting
 
 [analysis]
-tool          = "rust-code-analysis"            # rust-code-analysis is the supported tool
-mi_min        = 20                              # maintainability index floor (0–100)
+tool          = "rust-code-analysis"            # the rust module measures with rust-code-analysis
+mi_min        = 20                              # maintainability index floor (0–100); drop the key where the stack reports none
 cognitive_max = 15                              # cognitive complexity, per function
 
 [tests]
@@ -508,7 +516,7 @@ and the six gates are run against the workspace before handoff.
 | `src/cli.rs` | the argv surface and exit codes |
 | `src/gate.rs` | the gate vocabulary: names, order, fix hints — the one gate list |
 | `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
-| `src/lang/` | language modules — `rust`, `typescript`, `javascript` — plus what more than one drives: the node ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc parsing, test runners, stryker, coverage) and the tool integrations (`tokei`, `rust-code-analysis`) |
+| `src/lang/` | language modules — `rust`, `typescript`, `javascript` — each carrying the tools it measures with (rust: `tokei`, `rust-code-analysis`; the node modules: `eslint`), plus the node ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc parsing, test runners, stryker, coverage) |
 | `src/session.rs` | one run: what is measured, in what order, what is printed (`session/{setup,output}.rs`) |
 | `src/targets.rs` | target scoping and the measured file set |
 | `src/config/` | `.mido.toml` loading, validation and defaults |

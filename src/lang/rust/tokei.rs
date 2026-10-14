@@ -1,5 +1,5 @@
-//! tokei: the code lines per file the size gate judges — one integration every
-//! module that carries source tokei counts shares.
+//! tokei: the code lines per file the size gate judges — the rust module's way
+//! of counting them.
 
 use crate::process::{self, Runner};
 use crate::targets::Target;
@@ -7,7 +7,7 @@ use serde_json::Value as Json;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// The size tool this runner drives.
+/// The size tool this integration drives.
 pub const TOOL: &str = "tokei";
 
 /// Code lines per file, as tokei reports them; measurement failures land in
@@ -17,17 +17,10 @@ pub fn code_lines(
     repo: &Path,
     target: &Target,
     files: &[String],
-    tool: &str,
     probe_tool: &str,
     on_error: &mut Vec<String>,
 ) -> BTreeMap<String, i64> {
     if files.is_empty() {
-        return BTreeMap::new();
-    }
-    if tool != TOOL {
-        on_error.push(format!(
-            "size tool `{tool}` is not supported by this runner (only {TOOL})"
-        ));
         return BTreeMap::new();
     }
 

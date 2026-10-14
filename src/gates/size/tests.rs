@@ -1,5 +1,7 @@
 use super::*;
-use crate::test_support::{config_for, gate_run_for, touch, FakeRunner, MiniRepo};
+use crate::test_support::{
+    config_for, gate_run_for, js_config_for, js_gate_run_for, MiniJsRepo, MiniRepo,
+};
 
 fn limits() -> SizeLimits {
     SizeLimits {
@@ -16,6 +18,19 @@ fn unit(name: &str, sloc: i64) -> Unit {
         name: name.to_string(),
         path: "src/foo.rs".to_string(),
         ..Unit::new("src/foo.rs", name)
+    }
+}
+
+/// The readings a gate judges: the measured files, and the units in them.
+fn readings(lines: &[(&str, i64)], units: Vec<Unit>) -> Measurements {
+    Measurements {
+        files: lines.iter().map(|(path, _)| path.to_string()).collect(),
+        lines: lines
+            .iter()
+            .map(|(path, count)| (path.to_string(), *count))
+            .collect(),
+        units,
+        ..Measurements::default()
     }
 }
 
@@ -37,6 +52,23 @@ fn file_sizes_fail_at_the_ceiling_and_warn_before_it() {
     assert!(details
         .iter()
         .any(|line| line.contains("src/small.rs: 10 code lines (ok)")));
+}
+
+#[test]
+fn a_file_nesting_reading_fails_at_the_ceiling_and_warns_before_it() {
+    let depths = BTreeMap::from([
+        ("src/deep.rs".to_string(), 4),
+        ("src/nearly.rs".to_string(), 3),
+        ("src/flat.rs".to_string(), 1),
+    ]);
+
+    let (problems, details) = judge_file_nesting(&depths, &limits());
+
+    assert_eq!(problems.len(), 1);
+    assert!(problems[0].contains("src/deep.rs: nesting depth 4 (fail >= 4)"));
+    assert!(details
+        .iter()
+        .any(|line| line.contains("file src/nearly.rs: nesting depth 3 (warn >= 3)")));
 }
 
 #[test]
@@ -99,14 +131,10 @@ fn a_function_over_two_ceilings_reports_both_but_is_not_near_one() {
 #[test]
 fn the_gate_fails_when_a_measured_file_is_over_the_ceiling() {
     let repo = MiniRepo::build(None);
-    touch(&repo, "src/foo.rs");
     let config = config_for(&repo);
-    let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 600 } }] } });
-    let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-    let units = vec![unit("small", 5)];
+    let measurements = readings(&[("src/foo.rs", 600)], vec![unit("small", 5)]);
 
-    let files = vec!["src/foo.rs".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &units, &[]);
+    let result = gate_size(&gate_run_for(&repo, &config, &[]), &measurements);
 
     assert_eq!(result.status, FAIL);
     assert!(result.summary.contains("worst function"));
@@ -116,12 +144,14 @@ fn the_gate_fails_when_a_measured_file_is_over_the_ceiling() {
 #[test]
 fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
     let repo = MiniRepo::build(None);
-    touch(&repo, "src/foo.rs");
     let config = config_for(&repo);
-    let runner = FakeRunner::with(&[("tokei", 127, "")]);
+    let measurements = Measurements {
+        files: vec!["src/foo.rs".to_string()],
+        errors: vec!["tokei could not measure 1 file(s) (exit 127)".to_string()],
+        ..Measurements::default()
+    };
 
-    let files = vec!["src/foo.rs".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &[], &[]);
+    let result = gate_size(&gate_run_for(&repo, &config, &[]), &measurements);
 
     assert_eq!(result.status, INCOMPLETE);
     assert!(result
@@ -138,10 +168,8 @@ fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
 fn a_target_without_rust_files_passes_as_nothing_to_measure() {
     let repo = MiniRepo::build(None);
     let config = config_for(&repo);
-    let runner = FakeRunner::default();
 
-    let files = vec!["README.md".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &[], &[]);
+    let result = gate_size(&gate_run_for(&repo, &config, &[]), &Measurements::default());
 
     assert_eq!(result.status, PASS);
     assert_eq!(result.summary, "no rust source files");
@@ -158,19 +186,13 @@ fn a_target_without_rust_files_passes_as_nothing_to_measure() {
 #[test]
 fn a_measurement_error_with_units_present_is_still_incomplete() {
     let repo = MiniRepo::build(None);
-    touch(&repo, "src/foo.rs");
     let config = config_for(&repo);
-    let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
-    let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
-    let errors = vec!["src/bar.rs: rust-code-analysis could not read it".to_string()];
+    let measurements = Measurements {
+        errors: vec!["src/bar.rs: rust-code-analysis could not read it".to_string()],
+        ..readings(&[("src/foo.rs", 5)], vec![unit("f", 5)])
+    };
 
-    let files = vec!["src/foo.rs".to_string()];
-    let result = gate_size(
-        &runner,
-        &gate_run_for(&repo, &config, &files),
-        &[unit("f", 5)],
-        &errors,
-    );
+    let result = gate_size(&gate_run_for(&repo, &config, &[]), &measurements);
 
     assert_eq!(result.status, INCOMPLETE);
 }
@@ -178,13 +200,12 @@ fn a_measurement_error_with_units_present_is_still_incomplete() {
 #[test]
 fn missing_units_do_not_claim_nesting_was_absent() {
     let repo = MiniRepo::build(None);
-    touch(&repo, "src/foo.rs");
     let config = config_for(&repo);
-    let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
-    let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
 
-    let files = vec!["src/foo.rs".to_string()];
-    let result = gate_size(&runner, &gate_run_for(&repo, &config, &files), &[], &[]);
+    let result = gate_size(
+        &gate_run_for(&repo, &config, &[]),
+        &readings(&[("src/foo.rs", 5)], Vec::new()),
+    );
 
     assert!(result
         .details
@@ -198,21 +219,17 @@ fn missing_units_do_not_claim_nesting_was_absent() {
         "no units arrived, so nesting was never looked at: {:?}",
         result.details
     );
+    assert_eq!(result.summary, "no functions in 1 file(s)");
 }
 
 #[test]
 fn nesting_absence_is_stated_in_the_evidence() {
     let repo = MiniRepo::build(None);
     let config = config_for(&repo);
-    let tokei = serde_json::json!({ "Rust": { "reports": [{ "name": "src/foo.rs", "stats": { "code": 5 } }] } });
-    let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
 
-    let files = vec!["src/foo.rs".to_string()];
     let result = gate_size(
-        &runner,
-        &gate_run_for(&repo, &config, &files),
-        &[unit("f", 5)],
-        &[],
+        &gate_run_for(&repo, &config, &[]),
+        &readings(&[("src/foo.rs", 5)], vec![unit("f", 5)]),
     );
 
     assert_eq!(result.status, PASS);
@@ -220,4 +237,59 @@ fn nesting_absence_is_stated_in_the_evidence() {
         .details
         .iter()
         .any(|line| line.contains("nesting: not measured")));
+}
+
+#[test]
+fn nesting_that_arrived_per_file_is_not_reported_absent() {
+    let repo = MiniJsRepo::build(None);
+    let config = js_config_for(&repo);
+    let mut measurements = readings(&[("src/a.js", 40)], vec![unit("f", 12)]);
+    measurements.nesting.insert("src/a.js".to_string(), 2);
+
+    let result = gate_size(&js_gate_run_for(&repo, &config, &[]), &measurements);
+
+    assert_eq!(result.status, PASS);
+    assert!(!result
+        .details
+        .iter()
+        .any(|line| line.contains("nesting: not measured")));
+    assert!(result.details.iter().any(|line| line.contains("src/a.js")));
+}
+
+#[test]
+fn a_deeply_nested_javascript_file_fails_on_the_nesting_ceiling() {
+    let repo = MiniJsRepo::build(None);
+    let config = js_config_for(&repo);
+    let mut measurements = readings(&[("src/a.js", 40)], vec![unit("f", 12)]);
+    measurements.nesting.insert("src/a.js".to_string(), 5);
+
+    let result = gate_size(&js_gate_run_for(&repo, &config, &[]), &measurements);
+
+    assert_eq!(result.status, FAIL);
+    assert!(result
+        .details
+        .iter()
+        .any(|line| line.contains("src/a.js: nesting depth 5 (fail >= 4)")));
+}
+
+#[test]
+fn an_unsupported_size_tool_is_incomplete_with_a_pointer() {
+    let repo = MiniJsRepo::build(Some(
+        "
+        version = 1
+
+        [size]
+        tool = \"tokei\"
+    ",
+    ));
+    let config = js_config_for(&repo);
+
+    let result = gate_size(
+        &js_gate_run_for(&repo, &config, &[]),
+        &readings(&[("src/a.js", 40)], vec![unit("f", 12)]),
+    );
+
+    assert_eq!(result.status, INCOMPLETE);
+    assert!(result.summary.contains("`tokei` is not supported"));
+    assert!(result.fixes[0].contains("point [size] tool at eslint"));
 }

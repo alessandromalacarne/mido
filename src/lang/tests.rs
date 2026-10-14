@@ -47,10 +47,14 @@ fn every_module_is_known_by_name() {
 }
 
 #[test]
-fn the_shared_metric_tools_ship_with_every_module() {
-    for lang in LANGS {
-        assert_eq!(lang.size_tool(), "tokei");
-        assert_eq!(lang.metrics_tool(), "rust-code-analysis");
+fn every_module_names_the_tools_it_measures_with() {
+    assert_eq!(Lang::Rust.size_tool(), "tokei");
+    assert_eq!(Lang::Rust.metrics_tool(), "rust-code-analysis");
+
+    // The node modules measure the same way as each other, not as rust.
+    for lang in [Lang::TypeScript, Lang::JavaScript] {
+        assert_eq!(lang.size_tool(), "eslint");
+        assert_eq!(lang.metrics_tool(), "eslint");
     }
 }
 

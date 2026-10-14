@@ -1,10 +1,12 @@
 //! The node ecosystem, shared by the javascript and typescript modules:
 //! package.json targets, prettier/eslint/tsc output, the package manager's
-//! test script and its runners, stryker. Everything here behaves the same for
-//! a `.js` and a `.ts` repo; the modules own what differs between them.
+//! test script and its runners, stryker, and the eslint measurement pass.
+//! Everything here behaves the same for a `.js` and a `.ts` repo; the modules
+//! own what differs between them.
 
 pub mod coverage;
 pub mod diagnostics;
+pub mod eslint;
 pub mod mutation;
 pub mod suite;
 pub mod targets;

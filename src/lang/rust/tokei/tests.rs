@@ -21,7 +21,6 @@ fn tokei_counts_come_from_the_report() {
         &repo.root,
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
-        "tokei",
         "cargo",
         &mut errors,
     );
@@ -29,26 +28,6 @@ fn tokei_counts_come_from_the_report() {
     assert_eq!(counts.get("src/foo.rs"), Some(&12));
     assert!(!counts.contains_key("Total"));
     assert!(errors.is_empty());
-}
-
-#[test]
-fn an_unsupported_size_tool_is_an_error_not_a_silent_pass() {
-    let repo = MiniRepo::build(None);
-    let runner = FakeRunner::default();
-    let mut errors = Vec::new();
-
-    let counts = code_lines(
-        &runner,
-        &repo.root,
-        &Target::workspace_target("Cargo.toml"),
-        &["src/foo.rs".to_string()],
-        "scc",
-        "cargo",
-        &mut errors,
-    );
-
-    assert!(counts.is_empty());
-    assert!(errors[0].contains("`scc` is not supported"));
 }
 
 #[test]
@@ -62,7 +41,6 @@ fn unreadable_tokei_output_is_an_error() {
         &repo.root,
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
-        "tokei",
         "cargo",
         &mut errors,
     );
@@ -81,7 +59,6 @@ fn a_failing_tokei_run_is_an_error_even_with_partial_output() {
         &repo.root,
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
-        "tokei",
         "cargo",
         &mut errors,
     );
@@ -106,7 +83,6 @@ fn the_probe_tool_is_the_module_the_run_declares() {
         &repo.root,
         &Target::workspace_target("package.json"),
         &["src/app.js".to_string()],
-        "tokei",
         "node",
         &mut errors,
     );

@@ -8,16 +8,20 @@ lint      = ["npx", "--no-install", "eslint", "."]
 typecheck = ["npx", "--no-install", "tsc", "--noEmit"]
 
 [size]
-tool           = "tokei"       # only tokei is supported today
+# the module measures with eslint — max-lines, max-lines-per-function,
+# complexity and max-depth, injected through the project's own eslint config —
+# so the readings come from the tool the repo already runs.
+tool           = "eslint"
 file_loc     = { warn = 300, fail = 500 }  # non-blank, non-comment lines per file
 function_loc = { warn = 40,  fail = 60  }  # lines per function
-complexity   = { warn = 10,  fail = 15  }  # cyclomatic or cognitive, per function
-nesting      = { warn = 3,   fail = 4   }  # deepest block nesting
+complexity   = { warn = 10,  fail = 15  }  # cyclomatic complexity, per function
+nesting      = { warn = 3,   fail = 4   }  # deepest block nesting, per file
 
 [analysis]
-tool    = "rust-code-analysis"  # only rust-code-analysis is supported today
-mi_min              = 20        # maintainability index floor (0–100, higher better)
+tool    = "eslint"       # cognitive complexity, through the repo's sonarjs rule
 cognitive_max       = 15        # cognitive complexity, per function
+# no mi_min: eslint reports no maintainability index, and a floor no reading
+# can back is INCOMPLETE, never a pass.
 
 [tests]
 # no command: the suite derives it from the repo's package manager (the

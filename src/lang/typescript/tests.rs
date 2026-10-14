@@ -32,6 +32,18 @@ fn the_defaults_carry_the_typescript_baseline() {
         defaults["mutation"]["kill_rate_min"],
         toml::Value::Integer(70)
     );
+    assert_eq!(
+        defaults["size"]["tool"],
+        toml::Value::String("eslint".into())
+    );
+    assert_eq!(
+        defaults["analysis"]["tool"],
+        toml::Value::String("eslint".into())
+    );
+    assert!(
+        defaults["analysis"].get("mi_min").is_none(),
+        "eslint reports no maintainability index, so the node baseline sets no floor"
+    );
 }
 
 fn string_array(value: &toml::Value) -> Vec<String> {
@@ -72,16 +84,18 @@ fn fallback_commands_add_the_typecheck_to_the_node_ones() {
 
 #[test]
 fn typescript_source_files_are_the_ts_family() {
-    for path in ["src/app.ts", "src/widget.tsx", "src/types.d.ts"] {
+    for path in [
+        "src/app.ts",
+        "src/widget.tsx",
+        "src/types.d.ts",
+        "src/loader.mts",
+        "src/legacy.cts",
+    ] {
         assert!(is_source(path), "{path} is typescript");
     }
-    // `.mts`/`.cts` stay out: rust-code-analysis silently skips them, and a
-    // file the metrics tool cannot read is INCOMPLETE, not a measurement.
     for path in [
         "src/app.js",
         "src/widget.jsx",
-        "src/loader.mts",
-        "src/legacy.cts",
         "package.json",
         "src/main.rs",
     ] {

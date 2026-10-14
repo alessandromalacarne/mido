@@ -19,7 +19,8 @@ is the real config, and the runner is `src/main.rs`.
 ```
 entry:      main.rs ─▶ cli.rs / mcp.rs ─▶ session.rs
 gates:      gates/* ─▶ {config, lang, metrics, process, report, targets, style}
-lang seam:  lang/mod.rs ─▶ lang/{rust,typescript,javascript}/* · shared lang/node · lang/tokei · lang/rust_code_analysis
+lang seam:  lang/mod.rs ─▶ lang/{rust,typescript,javascript}/*
+            rust: rust/{tokei,code_analysis,metrics} · node modules: node/eslint · shared: lang/node
 support:    config/ · process.rs · metrics.rs · targets.rs · report.rs · style.rs
 vocabulary: gate.rs (leaf — the six gates live here and only here)
 ```
@@ -37,6 +38,12 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
   A module declares its root marker (`manifest`), its bare fallback commands,
   and one arm per seam method; `LANGS` feeds inference, the MCP `lang` enum and
   `--lang`.
+- Measurement belongs to the module: `Lang::measure` is one pass that answers
+  with file lines, block nesting and function units, and each module drives its
+  own tools there (rust: `rust/tokei` + `rust/code_analysis`; the node modules:
+  `node/eslint`). Nothing in the seam assumes two modules share a tool, and
+  `[size] tool` / `[analysis] tool` are checked against what the module drives —
+  a name it cannot back is `INCOMPLETE`, never a measurement with something else.
 - `src/gates/` — gate judgement and verdicts. Each gate takes a `GateRun` and
   returns a `GateResult`; dispatch in `gates/mod.rs` is exhaustive over `Gate`.
 - `src/session.rs` (+ `session/setup.rs`, `session/output.rs`) — one run: target
@@ -46,7 +53,8 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
 - `src/report.rs` (+ `report/panel.rs`, `report/views.rs`, `report/markdown.rs`)
   — verdicts, gate lines, panels, failure report, markdown report.
 - `src/process.rs` (+ `process/git.rs`) — subprocess execution and git queries.
-- `src/metrics.rs` — `Unit` (function metrics) and lcov readings.
+- `src/metrics.rs` — `Unit` (function metrics), `Measurements` (one pass's
+  readings: lines, nesting, units, errors) and lcov readings.
 - `src/targets.rs` — target scoping and the measured file set.
 - `src/mcp.rs` + `src/mcp/` — the MCP server; it reuses the CLI in-process
   (`cli::try_parse_from` + `cli::main_with`), so a new CLI flag is one flag
@@ -102,5 +110,6 @@ Anything bigger than a one-line chore goes through the repo workflow:
 - Mutation is scoped to the change by default: `--in-diff` on a git-generated
   diff; `in_diff = false` in `[mutation]` sweeps the whole package.
 - Size ceilings (`.mido.toml`): file 300 warn / 500 fail code lines, function
-  40/60 sloc, complexity 10/15, nesting 3/4. Keep new modules under the warn
-  band and functions under 40 sloc; the ladder reports both.
+  40/60 sloc, complexity 10/15, nesting 3/4 (per file in the node modules, where
+  eslint's `max-depth` counts blocks). Keep new modules under the warn band and
+  functions under 40 sloc; the ladder reports both.

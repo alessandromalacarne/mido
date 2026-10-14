@@ -1,10 +1,10 @@
 //! The javascript module: the embedded javascript baseline, and what makes a
-//! repo javascript. The npm-ecosystem tooling it drives — package.json
-//! targets, prettier/eslint/tsc parsing, the package manager's test script and
-//! its runners, stryker, coverage — lives in the shared `node` module, which
-//! the typescript module drives too.
+//! repo javascript — the `.js`, `.mjs`, `.cjs`, `.jsx` source set, measured
+//! with eslint. The npm-ecosystem tooling it drives — package.json targets,
+//! prettier/eslint/tsc parsing, the package manager's test script and its
+//! runners, stryker, coverage — lives in the shared `node` module, which the
+//! typescript module drives too.
 //!
-//! The module covers plain javascript (`.js`, `.mjs`, `.cjs`, `.jsx`).
 //! Typescript is not one of its source extensions: a `.ts` repo wants a
 //! typecheck default this module does not have, and a module that stays silent
 //! about types would be lying about the syntax gate — the `typescript` module
