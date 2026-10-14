@@ -67,7 +67,8 @@ project built with LLMs should not ship below. Start by copying this repo's
 
 - Runs the gates in a fixed order: **syntax → size → analysis → tests → coverage → mutation**.
 - Drives one **language module** at a time — inferred from the repo (a root `Cargo.toml`
-  selects `rust`, a root `package.json` selects `javascript`) or forced with `--lang`. The module
+  selects `rust`, a root `tsconfig.json` selects `typescript`, a root `package.json`
+  selects `javascript`) or forced with `--lang`. The module
   owns the default commands, the output parsers, target detection, the workspace aid and the
   embedded baseline contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
   module recognizes exits 2 and says so.
@@ -86,27 +87,28 @@ project built with LLMs should not ship below. Start by copying this repo's
 
 ## The six gates
 
-| # | Gate | What it enforces | Tooling (rust · javascript) |
-|---|------|------------------|-----------------------------|
-| 1 | `syntax` | formatter, linter, type checker pass on the measured target | rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` · javascript: `prettier --check`, `eslint` (argv configurable) |
-| 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | `tokei` + `rust-code-analysis`, both modules |
-| 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis`, both modules |
-| 4 | `tests` | the test command passes | rust: `cargo test` · javascript: the package manager's `test` script (lockfile-detected) |
-| 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | rust: `cargo llvm-cov` · javascript: `c8` (lcov) |
-| 6 | `mutation` | percentage of mutants killed in the change — the whole package with `in_diff = false`, which is the javascript default | rust: `cargo-mutants` · javascript: `stryker` |
+| # | Gate | What it enforces | Tooling (rust · typescript · javascript) |
+|---|------|------------------|------------------------------------------|
+| 1 | `syntax` | formatter, linter, type checker pass on the measured target | rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` · typescript: `prettier --check`, `eslint`, `tsc --noEmit` · javascript: `prettier --check`, `eslint` (all argv configurable) |
+| 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | `tokei` + `rust-code-analysis`, every module |
+| 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis`, every module |
+| 4 | `tests` | the test command passes | rust: `cargo test` · typescript/javascript: the package manager's `test` script (lockfile-detected) |
+| 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | rust: `cargo llvm-cov` · typescript/javascript: the devDependencies' own runner — vitest or jest — else `c8` (lcov) |
+| 6 | `mutation` | percentage of mutants killed in the change — the whole package with `in_diff = false`, the node modules' default | rust: `cargo-mutants` · typescript/javascript: `stryker` |
 
 Built-in defaults, all overridable in `.mido.toml`:
 
 - **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4
 - **analysis** — maintainability index ≥ 20; cognitive complexity ≤ 15
 - **coverage** — total ≥ 80%; drop ≤ 0 points
-- **mutation** — kill rate ≥ 70%, scoped to the change (see below)
+- **mutation** — kill rate ≥ 70%; scoped to the change for rust, the whole package for the node modules (see below)
 - **timeouts** — syntax 1800s, tests 900s, mutation 3600s
 
-The javascript baseline carries the same thresholds; it differs in its commands:
-`prettier`/`eslint` for syntax (no typecheck — plain javascript has no type
-checker to run), the lockfile-detected `<package manager> test` for the suite,
-`c8` for coverage and `stryker` for mutation.
+The typescript and javascript baselines carry the same thresholds; they differ
+in their commands: `prettier`/`eslint` for syntax (plus `tsc --noEmit` for
+typescript), the lockfile-detected `<package manager> test` for the suite, the
+devDependencies' own coverage runner — vitest or jest, else `c8` — and `stryker`
+for mutation.
 
 ## Verdicts and exit codes
 
@@ -171,7 +173,7 @@ With Nix (the dev shell brings every gate tool along):
 
 ```sh
 nix build          # the binary
-nix develop        # cargo, rustfmt, clippy, tokei, rust-code-analysis, cargo-llvm-cov, cargo-mutants, cargo-nextest
+nix develop        # cargo, rustfmt, clippy, tokei, rust-code-analysis, cargo-llvm-cov, cargo-mutants, cargo-nextest, nodejs
 ```
 
 With cargo:
@@ -203,16 +205,16 @@ a gate: the command cannot run, the gate reports `INCOMPLETE`, and the run
 exits `2`. Install the tool — or work inside `nix develop`, whose dev shell
 carries all of them.
 
-The javascript baseline (`src/lang/javascript/defaults.toml`) calls the
-project's own devDependencies, through `npx --no-install` — never a network
-install:
+The typescript and javascript baselines
+(`src/lang/{typescript,javascript}/defaults.toml`) call the project's own
+devDependencies, through `npx --no-install` — never a network install:
 
 | Gate | Tools the baseline calls | Where they come from |
 |------|--------------------------|----------------------|
-| `syntax` | `prettier`, `eslint` | the project's devDependencies (typescript repos add `tsc --noEmit` as `typecheck`) |
-| `size` / `analysis` | `tokei`, `rust-code-analysis` | the dev shell; both parse javascript |
+| `syntax` | `prettier`, `eslint`, and `tsc --noEmit` for typescript | the project's devDependencies |
+| `size` / `analysis` | `tokei`, `rust-code-analysis` | the dev shell; both parse javascript and typescript (`.ts`/`.tsx`) |
 | `tests` | `<package manager> test` | the lockfile (`pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `package-lock.json`) picks the manager; npm when there is none |
-| `coverage` | `c8` | the project's devDependencies; wraps the test script and writes `lcov.info` where the gate reads it |
+| `coverage` | `vitest --coverage`, `jest --coverage`, or `c8` | derived from the devDependencies — vitest's or jest's own coverage when one is named, else `c8` wrapping the test script; all of them write `lcov.info` where the gate reads it |
 | `mutation` | `stryker` | the project's devDependencies; mido extends the repo's `stryker.config.*` with its own report path |
 
 ## Usage
@@ -228,7 +230,7 @@ mido mcp
 mido                          # measure the whole workspace
 mido -p lib                   # measure one package in full
 mido -p lib -p cli            # … several packages, in turn
-mido --lang javascript        # force the language module; default: inferred from the repo
+mido --lang typescript        # force the language module; default: inferred from the repo
 mido --list-targets           # show what can be measured, then exit
 mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
@@ -239,9 +241,10 @@ mido --baseline-lcov base.info         # coverage delta against a previous lcov
 mido mcp                      # serve the ladder as MCP tools on stdio
 ```
 
-`-p` resolves the way cargo resolves `--package`: by the name the target's
-manifest declares, with a declared `[targets.<name>]` name accepted too. An
-unknown name is a setup error (exit 2) — never a silent whole-workspace run.
+`-p` resolves the way the target's manifest spells it: by the name the manifest
+declares (the cargo package, the npm package), with a declared
+`[targets.<name>]` name accepted too. An unknown name is a setup error
+(exit 2) — never a silent whole-workspace run.
 
 ## MCP server
 
@@ -317,8 +320,9 @@ files, and its gate commands do not inherit the root `[gate]` sections.
 ## Configuration
 
 `.mido.toml` is the tool contract. Each module also ships a built-in baseline —
-the same contract, embedded as `src/lang/rust/defaults.toml` and
-`src/lang/javascript/defaults.toml` — so a cargo project or an npm package
+the same contract, embedded as `src/lang/rust/defaults.toml`,
+`src/lang/typescript/defaults.toml` and `src/lang/javascript/defaults.toml` — so
+a cargo project or an npm package
 with no config still gets the commands and thresholds below. The file overrides
 the baseline key by key; standalone (excluded) packages never inherit root
 commands and fall back to the module's bare commands instead.
@@ -427,10 +431,10 @@ target; a command that names its own `--in-diff` is a conflict (INCOMPLETE)
 unless the switch is off, so the two scopes never fight.
 
 The scope is rust's: `--in-diff` is a cargo-mutants flag, and stryker has no
-equivalent (it scopes through the `mutate` globs in its own config). So the
-javascript baseline ships `in_diff = false` and a javascript target sweeps the
-whole package; asking for `in_diff = true` there is refused with that reason
-rather than silently dropped.
+equivalent (it scopes through the `mutate` globs in its own config). So the node
+baselines (typescript, javascript) ship `in_diff = false` and their targets
+sweep the whole package; asking for `in_diff = true` there is refused with that
+reason rather than silently dropped.
 
 ## Reports
 
@@ -482,8 +486,8 @@ up into the main checkout and cannot resolve the crate's own workspace root.
 a setup error pointing at `--apply-workspace-aid`. That flag prepends a
 `[workspace]` marker to the target's `Cargo.toml` and marks the file
 `git update-index --skip-worktree`, so the aid is local-only and never committed.
-The javascript module needs no aid: node resolves no workspace above the
-package root.
+The javascript and typescript modules need no aid: node resolves no workspace
+above the package root.
 
 ## Development
 
@@ -504,7 +508,7 @@ and the six gates are run against the workspace before handoff.
 | `src/cli.rs` | the argv surface and exit codes |
 | `src/gate.rs` | the gate vocabulary: names, order, fix hints — the one gate list |
 | `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
-| `src/lang/` | language modules: `rust` and `javascript`, each with its own embedded defaults, parsers, targets and workspace aid — plus the tool integrations both share (`tokei`, `rust-code-analysis`, in `src/lang/{tokei,rust_code_analysis}.rs`) |
+| `src/lang/` | language modules — `rust`, `typescript`, `javascript` — plus what more than one drives: the node ecosystem toolkit (`node`: package.json targets, prettier/eslint/tsc parsing, test runners, stryker, coverage) and the tool integrations (`tokei`, `rust-code-analysis`) |
 | `src/session.rs` | one run: what is measured, in what order, what is printed (`session/{setup,output}.rs`) |
 | `src/targets.rs` | target scoping and the measured file set |
 | `src/config/` | `.mido.toml` loading, validation and defaults |
