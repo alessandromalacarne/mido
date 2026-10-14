@@ -111,68 +111,24 @@ struct MutationPass {
 /// each timed, scoped to the change (when there is one) and given the run's own
 /// output directory. Every pass but the first carries `--iterate`, so the
 /// mutants an earlier pass caught come back as skipped — and skipped counts as
-/// killed.
+/// killed. The module owns the argv shape, its state and its scope: mido hands
+/// it the run's directory and the change diff, and takes back what to run.
 fn mutation_passes(
     run: &GateRun<'_>,
     lang: Lang,
     output: &Path,
     change: Option<&ChangeScope>,
 ) -> Result<Vec<MutationPass>, GuardrailsError> {
-    let base = mutation_base(run, lang, change)?;
-    Ok(passes_over(&base, run, lang, output, change))
-}
-
-/// The configured mutation command (or the module's fallback), checked so mido
-/// stays in charge of the run's state and scope.
-fn mutation_base(
-    run: &GateRun<'_>,
-    lang: Lang,
-    change: Option<&ChangeScope>,
-) -> Result<Vec<String>, GuardrailsError> {
     let base = run
         .config
         .argv("mutation", "command", run.target)
         .or_else(|| lang.fallback_argv("mutation", "command"))
         .unwrap_or_default();
-    if names_own_output(&base) {
-        return Err(GuardrailsError::setup(
-            "the configured mutation command names its own --output",
-        )
-        .detail(
-            "mido owns the mutation state: a verdict may only be decided by the \
-             mutants a run itself started",
-        )
-        .hint(
-            "drop --output from [mutation] command — mido writes into its own scratch directory",
-        ));
-    }
-    if change.is_some() && names_own_diff(&base) {
-        return Err(GuardrailsError::setup(
-            "the configured mutation command names its own --in-diff",
-        )
-        .detail(
-            "mido scopes a default mutation run to the change: it generates the \
-             diff itself, so the two scopes would fight",
-        )
-        .hint(
-            "drop --in-diff from [mutation] command, or set `in_diff = false` in \
-             [mutation] to drive your own scope",
-        ));
-    }
-    Ok(base)
-}
+    lang.mutation_prepare(output, &run.target.dir(run.repo))?;
 
-/// One pass per declared test command, carrying the arguments that command
-/// names — deduplicated by those arguments, so a suite never runs twice.
-fn passes_over(
-    base: &[String],
-    run: &GateRun<'_>,
-    lang: Lang,
-    output: &Path,
-    change: Option<&ChangeScope>,
-) -> Vec<MutationPass> {
     let mut driven: Vec<Vec<String>> = Vec::new();
     let mut passes: Vec<MutationPass> = Vec::new();
+    let diff = change.map(|scope| scope.diff.as_path());
 
     for command in lang.test_commands(run.config, run.target, run.repo) {
         let test_args = lang.mutation_test_args(&command).unwrap_or_default();
@@ -181,64 +137,20 @@ fn passes_over(
         }
 
         let iterate = !passes.is_empty();
-        let args = pass_args(base, &test_args, iterate, output, change, lang);
+        let args = lang.mutation_pass_args(&base, &test_args, iterate, output, diff)?;
         passes.push(MutationPass { command, args });
         driven.push(test_args);
     }
 
     if passes.is_empty() {
-        let args = pass_args(base, &[], false, output, change, lang);
+        let args = lang.mutation_pass_args(&base, &[], false, output, diff)?;
         passes.push(MutationPass {
             command: Vec::new(),
             args,
         });
     }
 
-    passes
-}
-
-/// Whether the configured command names its own output directory — in any of
-/// the forms cargo-mutants' parser accepts.
-fn names_own_output(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg.starts_with("-o") || arg.starts_with("--output"))
-}
-
-/// Whether the configured command names its own diff scope — cargo-mutants'
-/// `--in-diff` and its `-D` short form.
-fn names_own_diff(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg.starts_with("-D") || arg.starts_with("--in-diff"))
-}
-
-/// One pass's argv: the configured command, timed, reading the change diff
-/// when there is one, carrying the run's output directory and the test
-/// arguments of the suite it drives.
-fn pass_args(
-    base: &[String],
-    test_args: &[String],
-    iterate: bool,
-    output: &Path,
-    change: Option<&ChangeScope>,
-    lang: Lang,
-) -> Vec<String> {
-    let mut args = base.to_vec();
-    if iterate && !args.iter().any(|arg| arg == "--iterate") {
-        args.push("--iterate".to_string());
-    }
-    args.push("--output".to_string());
-    args.push(output.to_string_lossy().to_string());
-    if let Some(change) = change {
-        args.push("--in-diff".to_string());
-        args.push(change.diff.to_string_lossy().to_string());
-    }
-    args.push("--timeout".to_string());
-    args.push(lang.mutation_timeout().to_string());
-    if !test_args.is_empty() {
-        args.push("--".to_string());
-        args.extend(test_args.iter().cloned());
-    }
-    args
+    Ok(passes)
 }
 
 /// The verdict for a command mido cannot drive: INCOMPLETE, never a pass.

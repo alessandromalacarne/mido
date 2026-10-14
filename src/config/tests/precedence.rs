@@ -31,7 +31,7 @@ fn target_section_overrides_the_root_threshold() {
 }
 
 #[test]
-fn thresholds_are_inherited_by_a_crate_target() {
+fn thresholds_are_inherited_by_a_package_target() {
     let repo = repo(
         "
             version = 1
@@ -59,7 +59,7 @@ fn standalone_crate_does_not_inherit_the_root_lint_command() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let frontend = Target::crate_target("frontend", false, "Cargo.toml");
+    let frontend = Target::package_target("frontend", false, "Cargo.toml");
 
     assert_eq!(config.argv("syntax", "lint", &frontend), None);
 }
@@ -75,7 +75,7 @@ fn workspace_member_inherits_the_root_lint_command() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let lib = Target::crate_target("lib", true, "Cargo.toml");
+    let lib = Target::package_target("lib", true, "Cargo.toml");
 
     assert_eq!(
         config.argv("syntax", "lint", &lib),
@@ -102,7 +102,7 @@ fn target_section_wins_over_the_root_command() {
         ",
     );
     let config = load(&repo).expect("config loads");
-    let frontend = Target::crate_target("frontend", false, "Cargo.toml");
+    let frontend = Target::package_target("frontend", false, "Cargo.toml");
 
     assert_eq!(
         config.argv("syntax", "lint", &frontend),
@@ -184,7 +184,7 @@ fn the_file_overrides_a_module_default_key_by_key() {
 fn a_standalone_crate_never_inherits_module_default_commands() {
     let repo = MiniRepo::build(None);
     let config = load(&repo).expect("defaults load");
-    let frontend = Target::crate_target("frontend", false, "Cargo.toml");
+    let frontend = Target::package_target("frontend", false, "Cargo.toml");
 
     assert_eq!(
         config.argv("tests", "command", &frontend),

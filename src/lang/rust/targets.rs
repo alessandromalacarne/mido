@@ -3,7 +3,7 @@
 use crate::config::{value, Config};
 use crate::error::GuardrailsError;
 use crate::lang::rust::MANIFEST;
-use crate::targets::{declared_targets, Target};
+use crate::targets::{declared_targets, resolve_named, Target};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -82,13 +82,13 @@ pub fn detect_targets(repo: &Path, config: &Config) -> BTreeMap<String, Target> 
     for crate_name in crate_dirs(repo) {
         if members.contains(&crate_name) {
             targets.entry(crate_name.clone()).or_insert_with(|| {
-                Target::crate_target(&crate_name, true, MANIFEST)
+                Target::package_target(&crate_name, true, MANIFEST)
                     .with_package(package_name(repo, &crate_name))
             });
         } else if excluded.contains(&crate_name) {
             targets.insert(
                 crate_name.clone(),
-                Target::crate_target(&crate_name, false, MANIFEST)
+                Target::package_target(&crate_name, false, MANIFEST)
                     .with_package(package_name(repo, &crate_name)),
             );
         }
@@ -99,40 +99,13 @@ pub fn detect_targets(repo: &Path, config: &Config) -> BTreeMap<String, Target> 
 }
 
 /// Resolve `-p` the way cargo resolves `--package`: by package name, with the
-/// listed target names accepted for declared targets. A name no target answers
-/// to is a setup error — never a silent whole-workspace run.
+/// listed target names accepted for declared targets.
 pub fn resolve_package(
     repo: &Path,
     config: &Config,
     spec: &str,
 ) -> Result<Target, GuardrailsError> {
-    let targets = detect_targets(repo, config);
-    if let Some(target) = targets.get(spec) {
-        return Ok(target.clone());
-    }
-    if let Some(target) = targets
-        .values()
-        .find(|target| target.package.as_deref() == Some(spec))
-    {
-        return Ok(target.clone());
-    }
-
-    Err(unknown_package_error(spec, &targets))
-}
-
-fn unknown_package_error(spec: &str, targets: &BTreeMap<String, Target>) -> GuardrailsError {
-    let mut known: Vec<String> = targets
-        .values()
-        .map(|target| match &target.package {
-            Some(package) if *package != target.name => format!("{} ({package})", target.name),
-            _ => target.name.clone(),
-        })
-        .collect();
-    known.sort();
-
-    GuardrailsError::setup(format!("package `{spec}` not found in this workspace"))
-        .detail(format!("known names: {}", known.join(", ")))
-        .hint("pass a package name, or run without -p to measure the whole workspace")
+    resolve_named(&detect_targets(repo, config), spec)
 }
 
 #[cfg(test)]

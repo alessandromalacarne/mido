@@ -32,7 +32,7 @@ fn a_relative_report_path_lands_in_the_target_directory() {
     let (_, path) = coverage_report_path(
         &argv(&["cargo", "llvm-cov", "--lcov", "--output-path", "lcov.info"]),
         &repo.root,
-        &Target::crate_target("frontend", false, "Cargo.toml"),
+        &Target::package_target("frontend", false, "Cargo.toml"),
         &repo.root,
     );
 

@@ -105,7 +105,7 @@ fn a_member_target_diff_stays_workspace_root_relative() {
         ..Pass::default()
     })])
     .change(&["frontend/src/foo.rs"]);
-    let target = Box::leak(Box::new(crate::targets::Target::crate_target(
+    let target = Box::leak(Box::new(crate::targets::Target::package_target(
         "frontend",
         true,
         crate::lang::rust::MANIFEST,

@@ -3,7 +3,7 @@ use crate::test_support::{FakeRunner, MiniRepo};
 use std::path::PathBuf;
 
 fn target() -> Target {
-    Target::crate_target("frontend", false, MANIFEST)
+    Target::package_target("frontend", false, MANIFEST)
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn the_aid_never_writes_outside_the_directory_it_was_pointed_at() {
     let runner = FakeRunner::default();
     let missing = Target {
         path: "gone".to_string(),
-        ..Target::crate_target("frontend", false, MANIFEST)
+        ..Target::package_target("frontend", false, MANIFEST)
     };
     let mut out = Vec::new();
 
@@ -159,7 +159,7 @@ fn a_workspace_member_needs_no_probe() {
     validate_target_setup(
         &runner,
         &repo.root,
-        &Target::crate_target("lib", true, MANIFEST),
+        &Target::package_target("lib", true, MANIFEST),
         false,
         &mut Vec::new(),
     )
@@ -185,7 +185,7 @@ fn a_resolvable_crate_needs_no_probe_result_beyond_itself() {
 #[test]
 fn a_workspace_member_with_a_path_never_asks_for_the_aid() {
     let repo = MiniRepo::build(None);
-    let member = Target::crate_target("lib", true, MANIFEST);
+    let member = Target::package_target("lib", true, MANIFEST);
     // cargo answers with the outer workspace root, which for a member is fine.
     let probe = Outcome::new(0, "/repo/Cargo.toml\n", "");
 
@@ -195,7 +195,7 @@ fn a_workspace_member_with_a_path_never_asks_for_the_aid() {
 #[test]
 fn only_a_standalone_crate_with_a_path_is_probed() {
     let repo = MiniRepo::build(None);
-    let standalone = Target::crate_target("frontend", false, MANIFEST);
+    let standalone = Target::package_target("frontend", false, MANIFEST);
     let own_manifest = repo.root.join("frontend/Cargo.toml");
     let answers_itself = Outcome::new(0, format!("{}\n", own_manifest.display()), "");
 

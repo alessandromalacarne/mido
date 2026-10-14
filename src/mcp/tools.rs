@@ -54,8 +54,9 @@ fn selection_properties() -> Value {
         "packages": {
             "type": "array",
             "items": { "type": "string" },
-            "description": "measure only these packages, by cargo package name; default: \
-                            the whole workspace",
+            "description": "measure only these packages, by the name the target's \
+                            manifest declares (the cargo package, the npm package); \
+                            default: the whole workspace",
         },
     })
 }

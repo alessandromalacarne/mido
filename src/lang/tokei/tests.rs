@@ -22,6 +22,7 @@ fn tokei_counts_come_from_the_report() {
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
         "tokei",
+        "cargo",
         &mut errors,
     );
 
@@ -42,6 +43,7 @@ fn an_unsupported_size_tool_is_an_error_not_a_silent_pass() {
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
         "scc",
+        "cargo",
         &mut errors,
     );
 
@@ -61,6 +63,7 @@ fn unreadable_tokei_output_is_an_error() {
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
         "tokei",
+        "cargo",
         &mut errors,
     );
 
@@ -79,9 +82,34 @@ fn a_failing_tokei_run_is_an_error_even_with_partial_output() {
         &Target::workspace_target("Cargo.toml"),
         &["src/foo.rs".to_string()],
         "tokei",
+        "cargo",
         &mut errors,
     );
 
     assert!(counts.is_empty());
     assert!(errors[0].contains("could not measure"));
+}
+
+#[test]
+fn the_probe_tool_is_the_module_the_run_declares() {
+    let repo = MiniRepo::build(None);
+    let tokei = serde_json::json!({
+        "JavaScript": {
+            "reports": [{ "name": "src/app.js", "stats": { "code": 7 } }]
+        }
+    });
+    let runner = FakeRunner::with(&[("tokei", 0, &tokei.to_string())]);
+    let mut errors = Vec::new();
+
+    let counts = code_lines(
+        &runner,
+        &repo.root,
+        &Target::workspace_target("package.json"),
+        &["src/app.js".to_string()],
+        "tokei",
+        "node",
+        &mut errors,
+    );
+
+    assert_eq!(counts.get("src/app.js"), Some(&7));
 }

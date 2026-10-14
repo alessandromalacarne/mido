@@ -98,7 +98,57 @@ fn the_language_module_is_inferred_from_the_environment() {
         errors.contains("no language module recognizes this repo"),
         "{errors}"
     );
-    assert!(errors.contains("--lang rust"), "{errors}");
+    assert!(
+        errors.contains("known languages: rust, javascript"),
+        "{errors}"
+    );
+    assert!(errors.contains("--lang"), "{errors}");
+}
+
+#[test]
+fn a_package_manifest_selects_the_javascript_module() {
+    let repo = tempfile::tempdir().expect("temp dir");
+    write(
+        repo.path().join("package.json"),
+        "{ \"name\": \"mini\", \"workspaces\": [\"tools\"] }\n",
+    );
+    write(
+        repo.path().join("tools/package.json"),
+        "{ \"name\": \"mini-tools\" }\n",
+    );
+
+    let output = run(repo.path(), &["--list-targets"]);
+    let printed = stdout(&output);
+
+    assert_eq!(output.status.code(), Some(0), "{printed}");
+    assert!(printed.contains("workspace"), "{printed}");
+    assert!(printed.contains("tools"), "{printed}");
+}
+
+#[test]
+fn a_package_name_resolves_in_a_javascript_workspace() {
+    let repo = tempfile::tempdir().expect("temp dir");
+    write(
+        repo.path().join("package.json"),
+        "{ \"name\": \"mini\", \"workspaces\": [\"tools\"] }\n",
+    );
+    write(
+        repo.path().join("tools/package.json"),
+        "{ \"name\": \"mini-tools\" }\n",
+    );
+
+    let unknown = run(repo.path(), &["-p", "nope"]);
+    assert_eq!(unknown.status.code(), Some(2), "{}", stderr(&unknown));
+    assert!(
+        stderr(&unknown).contains("package `nope` not found"),
+        "{}",
+        stderr(&unknown)
+    );
+    assert!(
+        stderr(&unknown).contains("mini-tools"),
+        "{}",
+        stderr(&unknown)
+    );
 }
 
 #[test]

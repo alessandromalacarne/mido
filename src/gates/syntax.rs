@@ -84,7 +84,13 @@ fn run_step(
     );
     let output = result.combined();
 
-    lang.syntax_outcome(name, &argv.join(" "), &output, result.code)
+    lang.syntax_outcome(
+        name,
+        &argv.join(" "),
+        &output,
+        result.code,
+        &target.dir(repo),
+    )
 }
 
 fn syntax_result(

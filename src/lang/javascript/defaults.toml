@@ -1,0 +1,41 @@
+# Built-in javascript defaults — mido's baseline contract for npm packages.
+# A repo's `.mido.toml` overrides these key by key.
+version = 1
+
+[syntax]
+format = ["npx", "--no-install", "prettier", "--check", "."]
+lint   = ["npx", "--no-install", "eslint", "."]
+# no typecheck: plain javascript has no type checker. A typescript repo adds
+# `typecheck = ["npx", "--no-install", "tsc", "--noEmit"]` itself.
+
+[size]
+tool           = "tokei"       # only tokei is supported today
+file_loc     = { warn = 300, fail = 500 }  # non-blank, non-comment lines per file
+function_loc = { warn = 40,  fail = 60  }  # lines per function
+complexity   = { warn = 10,  fail = 15  }  # cyclomatic or cognitive, per function
+nesting      = { warn = 3,   fail = 4   }  # deepest block nesting
+
+[analysis]
+tool    = "rust-code-analysis"  # only rust-code-analysis is supported today
+mi_min              = 20        # maintainability index floor (0–100, higher better)
+cognitive_max       = 15        # cognitive complexity, per function
+
+[tests]
+# no command: the suite derives it from the repo's package manager (the
+# lockfile) — `pnpm test`, `yarn test`, `bun test`, or `npm test`.
+timeout_secs = 900
+
+[coverage]
+# c8 wraps the repo's test script and writes lcov.info where the gate reads it.
+command          = ["npx", "--no-install", "c8", "--reporter=lcovonly", "--reports-dir", ".", "npm", "test"]
+coverage_min     = 80   # percent total line coverage of the measured target
+total_drop_max   = 0    # percentage points of total coverage you tolerate losing
+
+[mutation]
+command       = ["npx", "--no-install", "stryker", "run"]  # mido adds the report flags
+in_diff       = false          # stryker scopes through its own mutate globs: no diff scope yet
+timeout_secs  = 3600
+kill_rate_min = 70             # percent of mutants killed
+
+[failure]
+max_attempts_per_gate = 3

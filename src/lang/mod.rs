@@ -2,10 +2,14 @@
 //!
 //! The ladder is generic; everything stack-specific — default commands, output
 //! parsers, target detection, the environment probe — lives in a module under
-//! this one. The module a run uses is inferred from the repo unless `--lang`
-//! names it explicitly.
+//! this one. The tool integrations more than one module drives (tokei,
+//! rust-code-analysis) live at this level, beside them. The module a run uses
+//! is inferred from the repo unless `--lang` names it explicitly.
 
+pub mod javascript;
 pub mod rust;
+pub mod rust_code_analysis;
+pub mod tokei;
 
 use crate::error::GuardrailsError;
 use std::path::Path;
@@ -14,10 +18,12 @@ use std::path::Path;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
     Rust,
+    JavaScript,
 }
 
-/// Every module this build knows; inference and `--lang` pick from this list.
-pub const LANGS: [Lang; 1] = [Lang::Rust];
+/// Every module this build knows; inference and `--lang` pick from this list,
+/// in this order.
+pub const LANGS: [Lang; 2] = [Lang::Rust, Lang::JavaScript];
 
 /// What one syntax step made of its output.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -51,16 +57,25 @@ pub struct MutationReport {
 }
 
 impl Lang {
-    /// The module the repo itself selects: a root manifest names one.
+    /// The module the repo itself selects: the first one whose root manifest is
+    /// there — a repo carrying both a Cargo.toml and a package.json is rust's.
     pub fn infer(repo: &Path) -> Result<Self, GuardrailsError> {
-        let manifest = repo.join(rust::MANIFEST);
-        if manifest.exists() {
-            return Ok(Lang::Rust);
+        for lang in LANGS {
+            if repo.join(lang.manifest()).exists() {
+                return Ok(lang);
+            }
         }
 
         Err(
             GuardrailsError::setup("no language module recognizes this repo")
-                .detail(format!("looked for {}", manifest.display()))
+                .detail(format!(
+                    "looked for {}",
+                    LANGS
+                        .iter()
+                        .map(|lang| lang.manifest())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
                 .detail(format!(
                     "known languages: {}",
                     LANGS
@@ -69,7 +84,7 @@ impl Lang {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ))
-                .hint("pass --lang rust to force a module, or run against a project it knows"),
+                .hint("pass --lang to force a module, or run against a project it knows"),
         )
     }
 
@@ -77,6 +92,15 @@ impl Lang {
     pub fn name(self) -> &'static str {
         match self {
             Lang::Rust => rust::NAME,
+            Lang::JavaScript => javascript::NAME,
+        }
+    }
+
+    /// The manifest a root directory carries when this module owns the repo.
+    pub fn manifest(self) -> &'static str {
+        match self {
+            Lang::Rust => rust::MANIFEST,
+            Lang::JavaScript => javascript::MANIFEST,
         }
     }
 
@@ -85,15 +109,17 @@ impl Lang {
     pub fn default_config(self) -> &'static toml::Table {
         match self {
             Lang::Rust => rust::default_config(),
+            Lang::JavaScript => javascript::default_config(),
         }
     }
 
     /// The bare command a gate falls back to when neither the config file nor
-    /// the module defaults supply one — the standalone-crate case, where root
+    /// the module defaults supply one — the standalone-package case, where root
     /// commands deliberately do not leak in.
     pub fn fallback_argv(self, gate: &str, key: &str) -> Option<Vec<String>> {
         match self {
             Lang::Rust => rust::fallback_argv(gate, key),
+            Lang::JavaScript => javascript::fallback_argv(gate, key),
         }
     }
 
@@ -104,17 +130,24 @@ impl Lang {
         command: &str,
         output: &str,
         returncode: i32,
+        work_dir: &Path,
     ) -> StepOutcome {
         match self {
-            Lang::Rust => rust::diagnostics::syntax_outcome(step, command, output, returncode),
+            Lang::Rust => {
+                rust::diagnostics::syntax_outcome(step, command, output, returncode, work_dir)
+            }
+            Lang::JavaScript => {
+                javascript::diagnostics::syntax_outcome(step, command, output, returncode, work_dir)
+            }
         }
     }
 
-    /// Fold duplicate diagnostics (clippy and `cargo check` report the same
-    /// lint at the same place) into one entry each.
+    /// Fold duplicate diagnostics (two tools reporting the same finding) into
+    /// one entry each.
     pub fn dedupe_problems(self, problems: &[String]) -> Vec<String> {
         match self {
             Lang::Rust => rust::diagnostics::dedupe_problems(problems),
+            Lang::JavaScript => javascript::diagnostics::dedupe_problems(problems),
         }
     }
 
@@ -127,9 +160,7 @@ impl Lang {
         files: &[String],
         on_error: &mut Vec<String>,
     ) -> Vec<crate::metrics::Unit> {
-        match self {
-            Lang::Rust => rust::analysis::analysis_units(runner, repo, target, files, on_error),
-        }
+        rust_code_analysis::analysis_units(runner, repo, target, files, self.env_tool(), on_error)
     }
 
     /// The code lines per file the size gate judges.
@@ -142,23 +173,17 @@ impl Lang {
         tool: &str,
         on_error: &mut Vec<String>,
     ) -> std::collections::BTreeMap<String, i64> {
-        match self {
-            Lang::Rust => rust::size::code_lines(runner, repo, target, files, tool, on_error),
-        }
+        tokei::code_lines(runner, repo, target, files, tool, self.env_tool(), on_error)
     }
 
     /// The `[size] tool` this module drives by default.
     pub fn size_tool(self) -> &'static str {
-        match self {
-            Lang::Rust => rust::size::TOOL,
-        }
+        tokei::TOOL
     }
 
     /// The tool that produces the function metrics both size and analysis judge.
     pub fn metrics_tool(self) -> &'static str {
-        match self {
-            Lang::Rust => rust::METRICS_TOOL,
-        }
+        rust_code_analysis::TOOL
     }
 
     /// The commands the tests gate runs for a target, in order.
@@ -170,6 +195,7 @@ impl Lang {
     ) -> Vec<Vec<String>> {
         match self {
             Lang::Rust => rust::suite::test_commands(config, target, repo),
+            Lang::JavaScript => javascript::suite::test_commands(config, target, repo),
         }
     }
 
@@ -177,6 +203,7 @@ impl Lang {
     pub fn test_summary(self, output: &str) -> Option<TestSummary> {
         match self {
             Lang::Rust => rust::suite::test_summary(output),
+            Lang::JavaScript => javascript::suite::test_summary(output),
         }
     }
 
@@ -184,6 +211,7 @@ impl Lang {
     pub fn source_label(self) -> &'static str {
         match self {
             Lang::Rust => rust::SOURCE_LABEL,
+            Lang::JavaScript => javascript::SOURCE_LABEL,
         }
     }
 
@@ -191,6 +219,7 @@ impl Lang {
     pub fn is_source(self, path: &str) -> bool {
         match self {
             Lang::Rust => rust::is_source(path),
+            Lang::JavaScript => javascript::is_source(path),
         }
     }
 
@@ -198,6 +227,7 @@ impl Lang {
     pub fn env_tool(self) -> &'static str {
         match self {
             Lang::Rust => rust::ENV_TOOL,
+            Lang::JavaScript => javascript::ENV_TOOL,
         }
     }
 
@@ -205,13 +235,37 @@ impl Lang {
     pub fn mutation_tool(self) -> &'static str {
         match self {
             Lang::Rust => rust::mutation::TOOL,
+            Lang::JavaScript => javascript::mutation::TOOL,
         }
     }
 
-    /// The per-mutant timeout argument value.
-    pub fn mutation_timeout(self) -> i64 {
+    /// Write whatever state the module's mutation tool needs under the run's
+    /// own output directory, before the passes run.
+    pub fn mutation_prepare(self, output: &Path, work_dir: &Path) -> Result<(), GuardrailsError> {
         match self {
-            Lang::Rust => rust::mutation::TIMEOUT_SECS,
+            Lang::Rust => Ok(()),
+            Lang::JavaScript => javascript::mutation::prepare(output, work_dir),
+        }
+    }
+
+    /// One mutation pass's argv: the configured command plus what the module's
+    /// mutation tool needs to run under mido's own output directory, carrying
+    /// the test arguments of the suite the pass drives and, when the run is
+    /// scoped, the change diff. A command that names its own output — or its
+    /// own scope under a scoped run — is a conflict the module refuses.
+    pub fn mutation_pass_args(
+        self,
+        base: &[String],
+        test_args: &[String],
+        iterate: bool,
+        output: &Path,
+        in_diff: Option<&Path>,
+    ) -> Result<Vec<String>, GuardrailsError> {
+        match self {
+            Lang::Rust => rust::mutation::pass_args(base, test_args, iterate, output, in_diff),
+            Lang::JavaScript => {
+                javascript::mutation::pass_args(base, test_args, iterate, output, in_diff)
+            }
         }
     }
 
@@ -220,6 +274,7 @@ impl Lang {
     pub fn mutation_report(self, output_dir: &Path) -> Option<MutationReport> {
         match self {
             Lang::Rust => rust::mutation::report::read(output_dir),
+            Lang::JavaScript => javascript::mutation::report::read(output_dir),
         }
     }
 
@@ -228,6 +283,9 @@ impl Lang {
     pub fn mutation_found_nothing(self, output: &str) -> bool {
         match self {
             Lang::Rust => rust::mutation::found_nothing(output),
+            // Stryker prints no such signal, and the change scope is not wired
+            // for javascript yet: its sweep is the whole package.
+            Lang::JavaScript => false,
         }
     }
 
@@ -236,6 +294,7 @@ impl Lang {
     pub fn mutation_test_args(self, command: &[String]) -> Option<Vec<String>> {
         match self {
             Lang::Rust => rust::mutation::test_args(command),
+            Lang::JavaScript => javascript::mutation::test_args(command),
         }
     }
 
@@ -247,6 +306,7 @@ impl Lang {
     ) -> std::collections::BTreeMap<String, crate::targets::Target> {
         match self {
             Lang::Rust => rust::targets::detect_targets(repo, config),
+            Lang::JavaScript => javascript::targets::detect_targets(repo, config),
         }
     }
 
@@ -259,6 +319,7 @@ impl Lang {
     ) -> Result<crate::targets::Target, GuardrailsError> {
         match self {
             Lang::Rust => rust::targets::resolve_package(repo, config, spec),
+            Lang::JavaScript => javascript::targets::resolve_package(repo, config, spec),
         }
     }
 
@@ -273,6 +334,9 @@ impl Lang {
     ) -> Result<(), GuardrailsError> {
         match self {
             Lang::Rust => rust::aid::validate_target_setup(runner, repo, target, apply_aid, out),
+            Lang::JavaScript => {
+                javascript::validate_target_setup(runner, repo, target, apply_aid, out)
+            }
         }
     }
 
@@ -280,8 +344,30 @@ impl Lang {
     pub fn no_targets_error(self, repo: &Path) -> GuardrailsError {
         match self {
             Lang::Rust => rust::no_targets_error(repo),
+            Lang::JavaScript => javascript::no_targets_error(repo),
         }
     }
+}
+
+/// The manifest a target names, or the setup error a run gets when it is gone —
+/// one check every module's target validation starts with.
+pub(crate) fn ensure_manifest(
+    repo: &Path,
+    target: &crate::targets::Target,
+) -> Result<(), GuardrailsError> {
+    let Some(manifest) = &target.manifest else {
+        return Ok(());
+    };
+    let path = repo.join(manifest);
+    if path.exists() {
+        return Ok(());
+    }
+
+    Err(
+        GuardrailsError::setup(format!("target `{}` has no manifest", target.name))
+            .detail(format!("looked for {}", path.display()))
+            .hint("pass --list-targets to see what can be measured"),
+    )
 }
 
 #[cfg(test)]

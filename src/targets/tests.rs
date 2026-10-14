@@ -1,13 +1,13 @@
 use super::*;
 
-fn crate_target(name: &str, member: bool) -> Target {
-    Target::crate_target(name, member, "Cargo.toml")
+fn package_target(name: &str, member: bool) -> Target {
+    Target::package_target(name, member, "Cargo.toml")
 }
 
 fn targets(entries: &[(&str, bool)]) -> BTreeMap<String, Target> {
     entries
         .iter()
-        .map(|(name, member)| (name.to_string(), crate_target(name, *member)))
+        .map(|(name, member)| (name.to_string(), package_target(name, *member)))
         .collect()
 }
 
@@ -35,7 +35,7 @@ fn labels_show_the_directory() {
         "workspace (./)"
     );
     assert_eq!(
-        Target::crate_target("frontend", false, "Cargo.toml").label(),
+        Target::package_target("frontend", false, "Cargo.toml").label(),
         "frontend (frontend/)"
     );
 }
@@ -51,7 +51,7 @@ fn a_package_target_measures_only_its_own_directory() {
     ]);
 
     assert_eq!(
-        target_files(&listed, &crate_target("lib", true), &all),
+        target_files(&listed, &package_target("lib", true), &all),
         files(&["src/foo.rs", "Cargo.toml"])
     );
 }
@@ -62,7 +62,7 @@ fn a_sibling_directory_with_a_shared_prefix_is_not_owned() {
     let listed = files(&["frontend/src/main.rs", "frontend-old/src/main.rs"]);
 
     assert_eq!(
-        target_files(&listed, &crate_target("frontend", false), &all),
+        target_files(&listed, &package_target("frontend", false), &all),
         files(&["src/main.rs"])
     );
 }
@@ -125,7 +125,7 @@ fn a_declared_sub_directory_target_measures_its_subtree_and_stays_in_the_workspa
 
 #[test]
 fn a_stored_target_field_round_trips_through_the_file_list() {
-    let target = crate_target("lib", true).with_package(Some("mido-guard".to_string()));
+    let target = package_target("lib", true).with_package(Some("mido-guard".to_string()));
 
     assert_eq!(target.package.as_deref(), Some("mido-guard"));
     assert_eq!(target.dir(Path::new("/repo")), Path::new("/repo/lib"));
