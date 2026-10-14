@@ -3,7 +3,7 @@
 
 use crate::config::Config;
 use crate::error::GuardrailsError;
-use crate::lang::javascript::MANIFEST;
+use crate::lang::node::MANIFEST;
 use crate::targets::{declared_targets, resolve_named, Target};
 use serde_json::Value as Json;
 use std::collections::{BTreeMap, BTreeSet};

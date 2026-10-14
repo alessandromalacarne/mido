@@ -2,6 +2,7 @@
 //! cargo-mutants — and the embedded rust baseline config.
 
 pub mod aid;
+pub mod coverage;
 pub mod diagnostics;
 pub mod mutation;
 pub mod suite;

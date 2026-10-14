@@ -71,6 +71,8 @@ fn tools_list_exposes_the_ladder_and_target_discovery() {
     let run = &tools[1]["inputSchema"]["properties"];
     assert_eq!(run["json"]["default"], true);
     assert_eq!(run["lang"]["enum"][0], "rust");
+    assert_eq!(run["lang"]["enum"][1], "typescript");
+    assert_eq!(run["lang"]["enum"][2], "javascript");
     assert_eq!(run["gates"]["items"]["enum"][5], "mutation");
     assert_eq!(run["packages"]["items"]["type"], "string");
     assert_eq!(run["repo"]["type"], "string");

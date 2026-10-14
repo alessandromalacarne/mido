@@ -26,8 +26,9 @@ cognitive_max       = 15        # cognitive complexity, per function
 timeout_secs = 900
 
 [coverage]
-# c8 wraps the repo's test script and writes lcov.info where the gate reads it.
-command          = ["npx", "--no-install", "c8", "--reporter=lcovonly", "--reports-dir", ".", "npm", "test"]
+# no command: the module derives one from the repo's devDependencies — vitest's
+# or jest's own coverage — and falls back to c8 wrapping the package manager's
+# test script. All of them write lcov.info beside the target.
 coverage_min     = 80   # percent total line coverage of the measured target
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 

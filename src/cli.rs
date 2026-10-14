@@ -29,7 +29,9 @@ pub struct Args {
     #[arg(short = 'p', long = "package", value_name = "NAME")]
     pub packages: Vec<String>,
 
-    /// language module; default: inferred from the repo (a root Cargo.toml selects rust)
+    /// language module; default: inferred from the repo (a root Cargo.toml
+    /// selects rust, a root tsconfig.json selects typescript, a root
+    /// package.json selects javascript)
     #[arg(long)]
     pub lang: Option<LangArg>,
 
@@ -80,6 +82,7 @@ pub enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum LangArg {
     Rust,
+    Typescript,
     Javascript,
 }
 
@@ -87,6 +90,7 @@ impl LangArg {
     pub fn lang(self) -> Lang {
         match self {
             LangArg::Rust => Lang::Rust,
+            LangArg::Typescript => Lang::TypeScript,
             LangArg::Javascript => Lang::JavaScript,
         }
     }
@@ -158,6 +162,14 @@ mod tests {
     #[test]
     fn the_language_flag_selects_a_module() {
         assert_eq!(parse_from(&["--lang", "rust"]).lang, Some(LangArg::Rust));
+        assert_eq!(
+            parse_from(&["--lang", "typescript"]).lang,
+            Some(LangArg::Typescript)
+        );
+        assert_eq!(
+            parse_from(&["--lang", "javascript"]).lang,
+            Some(LangArg::Javascript)
+        );
     }
 
     #[test]

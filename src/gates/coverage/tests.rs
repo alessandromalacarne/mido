@@ -19,6 +19,7 @@ fn the_report_path_is_filled_in_and_located() {
         &repo.root,
         &Target::workspace_target("Cargo.toml"),
         &scratch,
+        Lang::Rust,
     );
 
     assert!(command.join(" ").contains("guardrails-lcov-workspace.info"));
@@ -34,6 +35,7 @@ fn a_relative_report_path_lands_in_the_target_directory() {
         &repo.root,
         &Target::package_target("frontend", false, "Cargo.toml"),
         &repo.root,
+        Lang::Rust,
     );
 
     assert_eq!(path, repo.root.join("frontend/lcov.info"));
@@ -48,6 +50,7 @@ fn the_equals_form_of_the_output_flag_is_read_too() {
         &repo.root,
         &Target::workspace_target("Cargo.toml"),
         &repo.root,
+        Lang::Rust,
     );
 
     assert_eq!(path, repo.root.join("lcov.info"));
@@ -62,6 +65,7 @@ fn a_command_without_an_output_flag_defaults_to_lcov_info() {
         &repo.root,
         &Target::workspace_target("Cargo.toml"),
         &repo.root,
+        Lang::Rust,
     );
 
     assert_eq!(path, repo.root.join("lcov.info"));

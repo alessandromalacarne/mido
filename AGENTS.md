@@ -11,7 +11,7 @@ is the real config, and the runner is `src/main.rs`.
 - `cargo test --all-features` — the full suite (unit tests plus `tests/cli.rs` and `tests/mcp.rs`).
 - `cargo fmt` and `cargo clippy --all-targets --all-features -- -D warnings` — what the syntax gate checks.
 - `cargo run -- --list-targets` / `cargo run -- --gate size` — run the ladder against this repo.
-- `nix develop` — the dev shell with every gate tool (`tokei`, `rust-code-analysis`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`). When `cargo` is not on `PATH`, gate commands are wrapped in `nix develop -c …` automatically.
+- `nix develop` — the dev shell with every gate tool (`tokei`, `rust-code-analysis`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, `nodejs`). When `cargo` is not on `PATH`, gate commands are wrapped in `nix develop -c …` automatically.
 - Mutation runs as `cargo mutants -j2` with `.cargo/mutants.toml` (nextest, `profile = "mutants"`) and `[profile.mutants]` in `Cargo.toml`. By default the sweep is scoped to the change: mido writes a git diff (merge base with the default branch up to the working tree, untracked sources included) and passes `--in-diff`; `in_diff = false` in `[mutation]` sweeps the whole package. The gate gives every run its own `--output` directory under the run scratch, so a verdict can only ever be decided by the mutants that run tested — a previous run's `mutants.out` (or an `--iterate` on the configured command) is never read. It drives every test command the target declares, one pass each, later passes with `--iterate`: the in-run union means skipped counts as killed, and the evidence says so. Counts come from the run's `outcomes.json`; a mutant with no verdict (timed out) is INCOMPLETE.
 
 ## Architecture
@@ -19,7 +19,7 @@ is the real config, and the runner is `src/main.rs`.
 ```
 entry:      main.rs ─▶ cli.rs / mcp.rs ─▶ session.rs
 gates:      gates/* ─▶ {config, lang, metrics, process, report, targets, style}
-lang seam:  lang/mod.rs ─▶ lang/rust/*  (all stack-specific behavior)
+lang seam:  lang/mod.rs ─▶ lang/{rust,typescript,javascript}/* · shared lang/node · lang/tokei · lang/rust_code_analysis
 support:    config/ · process.rs · metrics.rs · targets.rs · report.rs · style.rs
 vocabulary: gate.rs (leaf — the six gates live here and only here)
 ```
@@ -27,10 +27,16 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
 - `src/gate.rs` — the gate vocabulary: the six gates, their order, names and fix
   hints. The CLI (`--gate`), the config schema, the report and the dispatch all
   derive from it; do not reintroduce a second gate list.
-- `src/lang/` — the language seam. Everything stack-specific (cargo argv,
-  rustc/clippy output parsing, tokei, rust-code-analysis, cargo-mutants, target
-  detection, workspace aid) lives in `src/lang/rust/`. The ladder itself stays
-  language-generic; new behavior for rust belongs here, not in `gates/`.
+- `src/lang/` — the language seam. Everything stack-specific lives in a module
+  under it: cargo/rustc/cargo-mutants and the workspace aid in `rust/`,
+  prettier/eslint/tsc parsing, package.json targets, the package manager's test
+  runners, stryker and coverage derivation in the shared `node/`, and what
+  differs between npm languages in `javascript/` and `typescript/` (source
+  sets, markers, baselines, the tsc typecheck). The ladder itself stays
+  language-generic; new stack behavior belongs in the modules, not in `gates/`.
+  A module declares its root marker (`manifest`), its bare fallback commands,
+  and one arm per seam method; `LANGS` feeds inference, the MCP `lang` enum and
+  `--lang`.
 - `src/gates/` — gate judgement and verdicts. Each gate takes a `GateRun` and
   returns a `GateResult`; dispatch in `gates/mod.rs` is exhaustive over `Gate`.
 - `src/session.rs` (+ `session/setup.rs`, `session/output.rs`) — one run: target
@@ -61,7 +67,8 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
 
 - Tests live in sibling `tests.rs` files (`src/gates/size.rs` →
   `src/gates/size/tests.rs`), not inline. Shared fixtures live in
-  `src/test_support.rs`: `FakeRunner`, `MiniRepo`, `gate_run_for`, `config_for`,
+  `src/test_support.rs`: `FakeRunner`, `MiniRepo`, `MiniJsRepo`,
+  `gate_run_for`, `gate_run_with`, `config_for`, `js_config_for`,
   `session_for`, `sample_results`, `run_cli`.
 - Gates are tested through `FakeRunner` responses, not real tools; the tool
   summaries (`cargo test`, `cargo mutants`, tokei, …) are the fixtures.
