@@ -70,10 +70,11 @@ project built with LLMs should not ship below. Start by copying this repo's
   output parsers, target detection, the workspace aid and the embedded baseline
   contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
   module recognizes exits 2 and says so.
-- Measures the **whole workspace** — no diff is read. `-p NAME` (repeatable,
-  cargo package semantics: the name the manifest declares) narrows the run to
-  the packages you name, each measured whole: the workspace roll-up is what
-  runs without one.
+- Measures the **whole workspace** — no diff decides what the gates run. `-p NAME`
+  (repeatable, cargo package semantics: the name the manifest declares) narrows the
+  run to the packages you name, each measured whole: the workspace roll-up is what
+  runs without one. The mutation gate is the one gate that reads the change, and
+  only to keep its sweep affordable (see *Mutation is scoped to the change*).
 - Stamps the verdict on the exact revision it measured (`HEAD` plus a dirty-state
   hash), so a green verdict cannot be reused on changed code.
 - Prints a failure report meant for the next reader (human or agent): gate
@@ -91,14 +92,14 @@ project built with LLMs should not ship below. Start by copying this repo's
 | 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis` |
 | 4 | `tests` | the test command passes | `cargo test` (argv configurable) |
 | 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | `cargo llvm-cov` (lcov) |
-| 6 | `mutation` | percentage of mutants killed in the package | `cargo-mutants` |
+| 6 | `mutation` | percentage of mutants killed in the change (the whole package with `in_diff = false`) | `cargo-mutants` |
 
 Built-in defaults, all overridable in `.mido.toml`:
 
 - **size** — file: 300 warn / 500 fail; function: 40/60; complexity: 10/15; nesting: 3/4
 - **analysis** — maintainability index ≥ 20; cognitive complexity ≤ 15
 - **coverage** — total ≥ 80%; drop ≤ 0 points
-- **mutation** — kill rate ≥ 70%
+- **mutation** — kill rate ≥ 70%, scoped to the change (see below)
 - **timeouts** — syntax 1800s, tests 900s, mutation 3600s
 
 ## Verdicts and exit codes
@@ -256,7 +257,10 @@ has to say goes to stderr.
 
 ## Workspace and packages
 
-Every gate measures the whole target; no diff is read. Without `-p`, that target
+Every gate measures the whole target; no diff decides which files are measured —
+with one exception. The mutation gate scopes its sweep to the change, because a
+full mutation sweep is the one thing in the ladder that costs minutes (see
+*Mutation is scoped to the change*). Without `-p`, that target
 is the **workspace** roll-up: the crate at the repo root, or the workspace those
 members belong to, minus the crates the root manifest excludes. The measured set
 is every file git can see — tracked files plus untracked ones that are not
@@ -326,6 +330,7 @@ total_drop_max   = 0    # percentage points of total coverage you tolerate losin
 
 [mutation]
 command       = ["cargo", "mutants", "-j2"]
+in_diff       = true           # scope the sweep to the change: mutation is the slow gate
 timeout_secs  = 3600
 kill_rate_min = 70             # percent of mutants killed
 
@@ -365,9 +370,29 @@ Notes:
   `[profile.mutants]` inheriting `test` with `debug = "none"` in `Cargo.toml`
   and a `.cargo/mutants.toml` with `test_tool = "nextest"` and
   `profile = "mutants"`, with `-j2` on the command: the mutants run two at a
-  time. Every timed run is a fresh sweep of the package — the gate never
-  reuses a previous run's kills. When a sweep is slow, cargo-mutants'
+  time. Every timed run is a fresh sweep of the scope — the gate never
+  reuses a previous run's kills. When a sweep is still slow, cargo-mutants'
   performance guide applies directly: <https://mutants.rs/performance.html>.
+
+### Mutation is scoped to the change
+
+Mutation testing is by far the most expensive gate: a full sweep builds and
+tests every mutant in the package, which on a real crate is minutes to hours,
+while what a handoff needs to know is whether the tests catch broken code in
+*what changed*. So `[mutation] in_diff` defaults to `true` and every pass runs
+`cargo-mutants --in-diff <file>` on a diff mido generates with git: the merge
+base with the repo's default branch (`origin/HEAD`, else `origin/main`,
+`origin/master`, `main`, `master`; `HEAD` when none resolves) up to the working
+tree, untracked source files included, scoped to the target by a pathspec. The
+kill rate — and the verdict — are decided by the mutants the change touches, so
+the gate's cost scales with the change, not with the package.
+
+A change that touches no rust file of the target passes with that stated as its
+evidence ("no rust file in the change"); a rust file whose changed lines yield no
+mutant (comments only) is INCOMPLETE, never a silent pass — a scope mistake can
+never hide behind a green mutation gate. Set `in_diff = false` to sweep the whole
+target; a command that names its own `--in-diff` is a conflict (INCOMPLETE)
+unless the switch is off, so the two scopes never fight.
 
 ## Reports
 
