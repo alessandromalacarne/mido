@@ -66,12 +66,12 @@ project built with LLMs should not ship below. Start by copying this repo's
 
 - Runs the gates in a fixed order: **syntax → size → analysis → tests → coverage → mutation**.
 - Drives one **language module** at a time — inferred from the repo (a root `Cargo.toml`
-  selects `rust`) or forced with `--lang`. The module owns the default commands, the
-  output parsers, target detection, the workspace aid and the embedded baseline
-  contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
+  selects `rust`, a root `package.json` selects `javascript`) or forced with `--lang`. The module
+  owns the default commands, the output parsers, target detection, the workspace aid and the
+  embedded baseline contract; a repo's `.mido.toml` overrides that baseline key by key. A repo no
   module recognizes exits 2 and says so.
 - Measures the **whole workspace** — no diff is read. `-p NAME` (repeatable,
-  cargo package semantics: the name the manifest declares) narrows the run to
+  package semantics: the name the target's manifest declares) narrows the run to
   the packages you name, each measured whole: the workspace roll-up is what
   runs without one.
 - Stamps the verdict on the exact revision it measured (`HEAD` plus a dirty-state
@@ -84,14 +84,14 @@ project built with LLMs should not ship below. Start by copying this repo's
 
 ## The six gates
 
-| # | Gate | What it enforces | Tooling |
-|---|------|------------------|---------|
-| 1 | `syntax` | formatter, linter, type checker pass on the measured target | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` (argv configurable) |
-| 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | `tokei` + `rust-code-analysis` |
-| 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis` |
-| 4 | `tests` | the test command passes | `cargo test` (argv configurable) |
-| 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | `cargo llvm-cov` (lcov) |
-| 6 | `mutation` | percentage of mutants killed in the package | `cargo-mutants` |
+| # | Gate | What it enforces | Tooling (rust · javascript) |
+|---|------|------------------|-----------------------------|
+| 1 | `syntax` | formatter, linter, type checker pass on the measured target | rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo check` · javascript: `prettier --check`, `eslint` (argv configurable) |
+| 2 | `size` | file LOC, function LOC, cyclomatic complexity, nesting depth | `tokei` + `rust-code-analysis`, both modules |
+| 3 | `analysis` | maintainability index floor, cognitive complexity ceiling | `rust-code-analysis`, both modules |
+| 4 | `tests` | the test command passes | rust: `cargo test` · javascript: the package manager's `test` script (lockfile-detected) |
+| 5 | `coverage` | total line coverage floor, coverage drop vs a baseline | rust: `cargo llvm-cov` · javascript: `c8` (lcov) |
+| 6 | `mutation` | percentage of mutants killed in the package | rust: `cargo-mutants` · javascript: `stryker` |
 
 Built-in defaults, all overridable in `.mido.toml`:
 
@@ -100,6 +100,11 @@ Built-in defaults, all overridable in `.mido.toml`:
 - **coverage** — total ≥ 80%; drop ≤ 0 points
 - **mutation** — kill rate ≥ 70%
 - **timeouts** — syntax 1800s, tests 900s, mutation 3600s
+
+The javascript baseline carries the same thresholds; it differs in its commands:
+`prettier`/`eslint` for syntax (no typecheck — plain javascript has no type
+checker to run), the lockfile-detected `<package manager> test` for the suite,
+`c8` for coverage and `stryker` for mutation.
 
 ## Verdicts and exit codes
 
@@ -196,6 +201,18 @@ a gate: the command cannot run, the gate reports `INCOMPLETE`, and the run
 exits `2`. Install the tool — or work inside `nix develop`, whose dev shell
 carries all of them.
 
+The javascript baseline (`src/lang/javascript/defaults.toml`) calls the
+project's own devDependencies, through `npx --no-install` — never a network
+install:
+
+| Gate | Tools the baseline calls | Where they come from |
+|------|--------------------------|----------------------|
+| `syntax` | `prettier`, `eslint` | the project's devDependencies (typescript repos add `tsc --noEmit` as `typecheck`) |
+| `size` / `analysis` | `tokei`, `rust-code-analysis` | the dev shell; both parse javascript |
+| `tests` | `<package manager> test` | the lockfile (`pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `package-lock.json`) picks the manager; npm when there is none |
+| `coverage` | `c8` | the project's devDependencies; wraps the test script and writes `lcov.info` where the gate reads it |
+| `mutation` | `stryker` | the project's devDependencies; mido extends the repo's `stryker.config.*` with its own report path |
+
 ## Usage
 
 ```
@@ -209,7 +226,7 @@ mido mcp
 mido                          # measure the whole workspace
 mido -p lib                   # measure one package in full
 mido -p lib -p cli            # … several packages, in turn
-mido --lang rust              # force the language module; default: inferred from the repo
+mido --lang javascript        # force the language module; default: inferred from the repo
 mido --list-targets           # show what can be measured, then exit
 mido --gate coverage --gate mutation   # run a subset of the ladder
 mido --json                   # machine-readable verdict
@@ -257,41 +274,45 @@ has to say goes to stderr.
 ## Workspace and packages
 
 Every gate measures the whole target; no diff is read. Without `-p`, that target
-is the **workspace** roll-up: the crate at the repo root, or the workspace those
-members belong to, minus the crates the root manifest excludes. The measured set
+is the **workspace** roll-up: the package at the repo root, or the workspace
+those members belong to, minus the packages the root manifest excludes (cargo
+`exclude`, npm `!` patterns). The measured set
 is every file git can see — tracked files plus untracked ones that are not
 ignored — scoped to the target: size, syntax and analysis measure them all, the
 tests gate runs the target's commands, and the coverage and mutation gates run
 whole-package tools. A repository git lists no file for measures nothing and
 exits 2.
 
-`-p NAME` picks packages instead, resolved the way cargo resolves `--package`:
-the name the target's manifest declares, plus declared `[targets.<name>]` names.
-Repeat the flag to measure several in turn; a name no target answers to is a
-setup error (exit 2) — never a silent whole-workspace run. `--list-targets`
-prints the names.
+`-p NAME` picks packages instead, resolved the way the target's manifest
+spells them: the name the manifest declares (the cargo package, the npm
+package), plus declared `[targets.<name>]` names. Repeat the flag to measure
+several in turn; a name no target answers to is a setup error (exit 2) — never
+a silent whole-workspace run. `--list-targets` prints the names.
 
 ## Targets
 
 `mido` measures one target at a time:
 
-- **workspace** — the crate (or workspace root) at the repo root;
-- **member** — each crate listed in the root `[workspace] members`;
-- **standalone crate** — a top-level crate directory excluded from the workspace;
+- **workspace** — the package (or workspace root) at the repo root;
+- **member** — each package the workspace patterns match (cargo `members`, npm
+  `workspaces`);
+- **standalone package** — a package outside the workspace: a top-level crate
+  the root manifest excludes, or a top-level npm package no pattern matches
+  (and members a `!` pattern takes back out);
 - **declared** — any `[targets.<name>]` section in `.mido.toml`.
 
 The banner and the report name the target and the files it measured. A
-standalone crate is its own target: the workspace roll-up never takes its files,
-and its gate commands do not inherit the root `[gate]` sections.
+standalone package is its own target: the workspace roll-up never takes its
+files, and its gate commands do not inherit the root `[gate]` sections.
 
 ## Configuration
 
-`.mido.toml` is the tool contract. Rust also ships a built-in baseline — the
-same contract, embedded as `src/lang/rust/defaults.toml` — so a
-cargo project with no config still gets the commands and thresholds below. The
-file overrides the baseline key by key; standalone (excluded) crates never
-inherit root commands and fall back to the module's bare `cargo` commands
-instead.
+`.mido.toml` is the tool contract. Each module also ships a built-in baseline —
+the same contract, embedded as `src/lang/rust/defaults.toml` and
+`src/lang/javascript/defaults.toml` — so a cargo project or an npm package
+with no config still gets the commands and thresholds below. The file overrides
+the baseline key by key; standalone (excluded) packages never inherit root
+commands and fall back to the module's bare commands instead.
 
 Example, mirroring this repo's own:
 
@@ -352,13 +373,19 @@ Notes:
   arguments that command names. Passes after the first run with `--iterate`, so
   the mutants an earlier pass caught come back as skipped — the evidence names
   each pass and what it caught.
-- The mutation gate **owns cargo-mutants' output directory**: every run gets its
-  own `--output` under the run scratch, so a verdict can only ever be decided by
-  the mutants that run tested — state from an earlier run (`mutants.out`) is
-  never read. A `--output` on the configured command is a conflict, not an
-  override: the gate reports INCOMPLETE. The counts come from the run's
-  `outcomes.json`; mutants that produced no verdict (timed out, or otherwise
-  unclassified) are INCOMPLETE, never silently dropped from the kill rate.
+- The mutation gate **owns the mutation tool's state**: every run gets its own
+  output directory under the run scratch, so a verdict can only ever be decided
+  by the mutants that run tested — a previous run's report is never read. For
+  cargo-mutants that means `--output`; a `--output` on the configured command is
+  a conflict, not an override, and the gate reports INCOMPLETE. The counts come
+  from the run's `outcomes.json`; mutants that produced no verdict (timed out, or
+  otherwise unclassified) are INCOMPLETE, never silently dropped from the kill
+  rate. Stryker gets the analogous treatment: mido writes its own config (the
+  repo's `stryker.config.*` extended, the json report inside the run's
+  directory) and passes it positionally; a config named by the command is the
+  same conflict. Every status but `Ignored` counts into the total — `Killed` is
+  a kill, `Survived` and `NoCoverage` are survivors, `CompileError` is unviable,
+  `Timeout` and any unknown status are INCOMPLETE.
 - Unknown keys, wrong types and malformed commands are config errors on purpose,
   so a typo cannot silently disable a gate or move a threshold.
 - For mutation speed, the recommended setup (shipped by this repo) is a
@@ -408,12 +435,15 @@ the evidence, and the fix hints; a gate that passed is not restated.
 
 ## Workspace aid
 
-In a worktree nested under `.agents/`, cargo walks up into the main checkout and
-cannot resolve the crate's own workspace root. `mido` probes with
+The workspace aid is rust's. In a worktree nested under `.agents/`, cargo walks
+up into the main checkout and cannot resolve the crate's own workspace root.
+`mido` probes with
 `cargo locate-project --workspace`; when the answer is wrong, the run stops with
 a setup error pointing at `--apply-workspace-aid`. That flag prepends a
 `[workspace]` marker to the target's `Cargo.toml` and marks the file
 `git update-index --skip-worktree`, so the aid is local-only and never committed.
+The javascript module needs no aid: node resolves no workspace above the
+package root.
 
 ## Development
 
@@ -434,7 +464,7 @@ and the six gates are run against the workspace before handoff.
 | `src/cli.rs` | the argv surface and exit codes |
 | `src/gate.rs` | the gate vocabulary: names, order, fix hints — the one gate list |
 | `src/mcp.rs` | the MCP server: `mido mcp` speaks JSON-RPC on stdio, with the tool schemas and argv mapping in `src/mcp/` |
-| `src/lang/` | language modules: the rust module's embedded defaults, parsers, targets and workspace aid |
+| `src/lang/` | language modules: `rust` and `javascript`, each with its own embedded defaults, parsers, targets and workspace aid — plus the tool integrations both share (`tokei`, `rust-code-analysis`, in `src/lang/{tokei,rust_code_analysis}.rs`) |
 | `src/session.rs` | one run: what is measured, in what order, what is printed (`session/{setup,output}.rs`) |
 | `src/targets.rs` | target scoping and the measured file set |
 | `src/config/` | `.mido.toml` loading, validation and defaults |
