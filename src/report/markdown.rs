@@ -1,6 +1,6 @@
 //! The markdown report the next step reads.
 
-use super::{verdict, GateResult};
+use super::{verdict, waived, GateResult};
 use crate::targets::Target;
 
 pub struct ReportContext<'a> {
@@ -13,7 +13,7 @@ pub struct ReportContext<'a> {
 }
 
 pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_>) -> String {
-    let mut lines = report_header(context, &verdict(results));
+    let mut lines = report_header(context, &verdict(results), &waived(results));
     lines.extend(summary_table(results));
     lines.push(String::new());
 
@@ -24,11 +24,19 @@ pub fn render_report_markdown(results: &[GateResult], context: &ReportContext<'_
     lines.join("\n")
 }
 
-fn report_header(context: &ReportContext<'_>, verdict_line: &str) -> Vec<String> {
+fn report_header(context: &ReportContext<'_>, verdict_line: &str, waived: &[&str]) -> Vec<String> {
     let mut lines = vec![
         format!("# Guardrails report — {}", context.target.name),
         String::new(),
         format!("VERDICT: {verdict_line}"),
+    ];
+    if !waived.is_empty() {
+        lines.push(format!(
+            "waived: {} — enabled = false in .mido.toml",
+            waived.join(", ")
+        ));
+    }
+    lines.extend([
         format!("revision: `{}`", context.revision),
         format!("dirty state hash: `{}`", context.dirty),
         format!("target: `{}`", context.target.label()),
@@ -38,7 +46,7 @@ fn report_header(context: &ReportContext<'_>, verdict_line: &str) -> Vec<String>
             context.source_count,
             context.source_label
         ),
-    ];
+    ]);
     lines.push(String::new());
     lines
 }

@@ -2,8 +2,8 @@
 
 use super::Session;
 use crate::report::{
-    render_banner, render_report_markdown, render_verdict, verdict, BannerContext, GateResult,
-    ReportContext,
+    render_banner, render_report_markdown, render_verdict, verdict, waived, BannerContext,
+    GateResult, ReportContext,
 };
 use crate::style::Style;
 use crate::targets::Target;
@@ -89,7 +89,11 @@ pub fn print_verdict(
     style: Style,
 ) {
     let final_verdict = verdict(results);
-    let _ = writeln!(out, "{}", render_verdict(&final_verdict, style));
+    let _ = writeln!(
+        out,
+        "{}",
+        render_verdict(&final_verdict, &waived(results), style)
+    );
     let _ = writeln!(
         out,
         "{}",
@@ -132,6 +136,7 @@ fn verdict_json(
         "revision": session.revision,
         "dirty": session.dirty,
         "gates": gates,
+        "waived": waived(results),
     })
 }
 

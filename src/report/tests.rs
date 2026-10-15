@@ -50,8 +50,8 @@ fn verdict_is_ship_ready_only_when_every_gate_passes() {
 
 #[test]
 fn the_verdict_panel_paints_by_outcome() {
-    let shipped = render_verdict(SHIP_READY, Style::colored());
-    let blocked = render_verdict("BLOCKED — size=FAIL", Style::colored());
+    let shipped = render_verdict(SHIP_READY, &[], Style::colored());
+    let blocked = render_verdict("BLOCKED — size=FAIL", &[], Style::colored());
 
     assert!(
         shipped.contains("\u{1b}[32mSHIP-READY\u{1b}[0m"),

@@ -108,7 +108,7 @@ fn run_one(
             gate.name(),
             SKIPPED,
             "`enabled = false` in .mido.toml",
-            ["a skipped gate is not a passed gate — the waiver has to be written down"],
+            ["waived by the config — the gate is not judged, and the verdict names it"],
         )
         .contract(format!(
             "{} [{}] enabled = false",

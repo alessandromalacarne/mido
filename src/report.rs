@@ -8,8 +8,6 @@ pub use markdown::{render_report_markdown, ReportContext};
 pub use panel::{gate_line, gate_progress_line, panel, render_verdict, status_glyph, visible_len};
 pub use views::{render_banner, render_failure, BannerContext, FailureContext};
 
-use std::collections::BTreeSet;
-
 pub const PASS: &str = "PASS";
 pub const FAIL: &str = "FAIL";
 pub const INCOMPLETE: &str = "INCOMPLETE";
@@ -55,14 +53,30 @@ impl GateResult {
         self
     }
 
-    pub fn passed(&self) -> bool {
-        self.status == PASS
+    /// Whether this result stands in the run's way.
+    ///
+    /// A gate the config waived reports `SKIPPED`: it did not pass, and it is
+    /// not a blocker either — the waiver is in writing, in the file its own
+    /// contract names, and the verdict names the gate.
+    pub fn blocks(&self) -> bool {
+        self.status != PASS && self.status != SKIPPED
     }
 }
 
 pub fn verdict(results: &[GateResult]) -> String {
-    let blocked: Vec<&GateResult> = results.iter().filter(|result| !result.passed()).collect();
+    let blocked: Vec<&GateResult> = results.iter().filter(|result| result.blocks()).collect();
     blocked_verdict(&blocked)
+}
+
+/// The gates the config waived, in ladder order. The verdict panel, the json
+/// and the report name them, so a green run with a waiver is never read as a
+/// green run without one.
+pub fn waived(results: &[GateResult]) -> Vec<&str> {
+    results
+        .iter()
+        .filter(|result| result.status == SKIPPED)
+        .map(|result| result.name.as_str())
+        .collect()
 }
 
 /// `BLOCKED — size=FAIL, mutation=INCOMPLETE`, for results already filtered.
@@ -80,15 +94,13 @@ pub(super) fn blocked_verdict(blocked: &[&GateResult]) -> String {
     )
 }
 
+/// 1 when a gate failed, 2 when a gate could not run to a verdict. A gate the
+/// config waived is neither — the ladder without it is the ladder that ran.
 pub fn exit_code(results: &[GateResult]) -> i32 {
-    let statuses: BTreeSet<&str> = results
-        .iter()
-        .map(|result| result.status.as_str())
-        .collect();
-    if statuses.contains(FAIL) {
+    if results.iter().any(|result| result.status == FAIL) {
         return 1;
     }
-    if statuses.contains(INCOMPLETE) || statuses.contains(SKIPPED) {
+    if results.iter().any(|result| result.status == INCOMPLETE) {
         return 2;
     }
     0

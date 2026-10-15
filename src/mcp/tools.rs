@@ -27,7 +27,9 @@ fn run_ladder_schema() -> Value {
         "description": "Run the guardrails ladder (`.mido.toml`) against the whole workspace, \
                         or the packages `-p` names, and return its report: exit_code 0 \
                         SHIP-READY, 1 BLOCKED (a gate failed), 2 INCOMPLETE (a gate could not \
-                        run) or a setup error. Silent by default: stdout carries nothing, and \
+                        run) or a setup error. A gate the config waives (`enabled = false`) \
+                        reports SKIPPED, runs nothing and leaves the code at 0; the verdict \
+                        json names it in `waived`. Silent by default: stdout carries nothing, and \
                         the markdown report — evidence and fix hints included — is written to \
                         `.mido/report.md` in the repository. Tests and mutation can run for \
                         many minutes.",
