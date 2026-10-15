@@ -79,7 +79,7 @@ pub fn render_failure(
     context: &FailureContext<'_>,
     style: Style,
 ) -> String {
-    let blocked: Vec<&GateResult> = results.iter().filter(|result| !result.passed()).collect();
+    let blocked: Vec<&GateResult> = results.iter().filter(|result| result.blocks()).collect();
     let mut lines = failure_header(&blocked, results.len(), context, style);
 
     for result in &blocked {

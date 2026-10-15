@@ -47,8 +47,10 @@ mido is not a linter framework. The ladder is the opinion, and it does not bend.
   `SHIP-READY`, `BLOCKED`. No custom gates, no plugins.
 - Thresholds ship with defaults; `.mido.toml` can move them, but unknown
   keys are config errors — the ladder refuses to guess what a typo meant.
-- Waivers have to be written down: `enabled = false` stops a gate from running
-  and still reports `SKIPPED`, and a skipped gate is never a pass.
+- Waivers have to be written down: `enabled = false` takes a gate out of the
+  ladder — it runs nothing, still reports `SKIPPED`, and the verdict names it
+  (`waived: mutation — enabled = false in .mido.toml`), so a green run with a
+  waiver is never read as a green run without one.
 - Fix hints prescribe the honest fix: moving code into another file does not
   pass the size gate, padding comments do not raise the maintainability index,
   and a surviving mutant needs a real assertion or a written equivalence
@@ -83,8 +85,8 @@ project built with LLMs should not ship below. Start by copying this repo's
 - Prints a failure report meant for the next reader (human or agent): gate
   position in the ladder, the contract it enforced, the evidence, and fix hints.
 - Refuses to treat "did not run" as "passed": a gate missing its tooling is
-  `INCOMPLETE`, a gate turned off in the config is `SKIPPED`, and neither is ever
-  a green verdict.
+  `INCOMPLETE` and never a green verdict, and a gate the config turns off is
+  `SKIPPED` — named as waived wherever the verdict is printed.
 
 ## The six gates
 
@@ -122,14 +124,15 @@ with something else.
 
 | Verdict | Exit | Meaning |
 |---------|------|---------|
-| `SHIP-READY` | 0 | every selected gate passed |
+| `SHIP-READY` | 0 | every gate the ladder ran passed; `waived` names the gates the config left out |
 | `BLOCKED — gate=FAIL, …` | 1 | at least one gate failed |
 | `BLOCKED — gate=INCOMPLETE, …` | 2 | a gate could not run to a verdict (missing tool, unanalyzable file, timeout) |
-| `BLOCKED — gate=SKIPPED, …` | 2 | a gate was disabled in the config, or nothing was measured |
 
-A `SKIPPED` gate is not a passed gate: `0` is reserved for gates that actually
-ran and passed. `INCOMPLETE` is never a pass either — fix the tooling (usually
-`nix develop`) and re-run before handing the work off.
+A `SKIPPED` gate is not a passed gate: it is a waiver written into `.mido.toml`,
+it runs nothing, and the verdict names it — `SHIP-READY` with a `waived` row is
+the ladder you configured passing, never a claim about the gate left out of it.
+`INCOMPLETE` is never a pass either — fix the tooling (usually `nix develop`) and
+re-run before handing the work off.
 
 ## Reading the output
 
@@ -161,6 +164,8 @@ revision stamp: febf29d11eec8ddb2bdea1f5fb1d01524543dc34 | bddc06f72e892e557a404
   in a fixed column and the one-line summary: `✓` PASS, `✗` FAIL, `!` INCOMPLETE,
   `·` SKIPPED. The glyph is the fallback channel — colour never carries the
   verdict alone.
+- A gate the config waived keeps its line (`· mutation`) and adds a row of its
+  own under the verdict: `waived: mutation — enabled = false in .mido.toml`.
 - While a slow gate runs, a terminal sees a `[place] ⋯ name  running…` line under
   the ladder, rewritten in place when the answer lands: `cargo test` takes a
   minute, and a frozen screen should not read as a hung one.
@@ -368,6 +373,7 @@ coverage_min     = 80   # percent total line coverage of the measured target
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
+# enabled     = false          # waive the gate: it reports SKIPPED, runs nothing, the verdict names it
 command       = ["cargo", "mutants", "-j2"]
 in_diff       = true           # scope the sweep to the change: mutation is the slow gate
 timeout_secs  = 3600
@@ -387,6 +393,9 @@ Notes:
 - Every command is an **argv array**, never a shell line: `["cargo", "test"]`,
   not `"cargo test | tail"`. A string command is a config error with the
   migration example in the hint.
+- `enabled = false` waives a gate in writing: it runs nothing, reports
+  `SKIPPED`, and leaves the exit code alone — the verdict names it. `INCOMPLETE`
+  is untouched: a gate that could not run is never green.
 - `[targets.<name>.<gate>]` overrides the root `[gate]` section for that target.
   Root commands are inherited by workspace members only — a standalone crate
   (one the root manifest excludes) does not inherit them, so `--all-features`
@@ -482,7 +491,8 @@ the evidence, and the fix hints; a gate that passed is not restated.
   when the session sets that variable; otherwise only stdout carries it.
 - `--silent` — stdout carries nothing: the exit code is the verdict, the report
   is the evidence, and stderr keeps its errors and warnings.
-- `--json` — the verdict as JSON, with per-gate statuses, for callers that parse.
+- `--json` — the verdict as JSON, with per-gate statuses and a `waived` list of
+  the gates the config left out, for callers that parse.
 - Gate artifacts (coverage lcov, mutation output) live under
   `$COMMANDCODE_SCRATCHPAD/guardrails/` or `~/.cache/guardrails/`.
 

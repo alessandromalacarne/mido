@@ -87,13 +87,22 @@ pub fn panel(title: &str, rows: &[String], style: Style) -> String {
 }
 
 /// The verdict, painted by what it says, inside the panel that closes a run.
-pub fn render_verdict(final_verdict: &str, style: Style) -> String {
+/// A waived gate gets a row of its own: the verdict is green for the ladder
+/// that ran, and the row says which gate was not part of it.
+pub fn render_verdict(final_verdict: &str, waived: &[&str], style: Style) -> String {
     let painted = if final_verdict == SHIP_READY {
         style.pass(final_verdict)
     } else {
         style.fail(final_verdict)
     };
-    panel("verdict", &[painted], style)
+    let mut rows = vec![painted];
+    if !waived.is_empty() {
+        rows.push(style.warn(&format!(
+            "waived: {} — enabled = false in .mido.toml",
+            waived.join(", ")
+        )));
+    }
+    panel("verdict", &rows, style)
 }
 
 /// A hash the eye can compare at a glance; the report keeps the full one.

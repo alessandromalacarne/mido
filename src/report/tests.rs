@@ -49,9 +49,56 @@ fn verdict_is_ship_ready_only_when_every_gate_passes() {
 }
 
 #[test]
+fn a_waived_gate_does_not_block_the_verdict() {
+    let results = vec![
+        GateResult::new("tests", PASS, "412 passed, 0 failed", Vec::<String>::new()),
+        GateResult::new(
+            "mutation",
+            SKIPPED,
+            "`enabled = false` in .mido.toml",
+            Vec::<String>::new(),
+        ),
+    ];
+
+    assert_eq!(verdict(&results), SHIP_READY);
+    assert_eq!(exit_code(&results), 0);
+}
+
+#[test]
+fn a_waived_gate_is_never_named_as_a_failing_one() {
+    let mut results = sample_results();
+    results.push(GateResult::new(
+        "mutation",
+        SKIPPED,
+        "`enabled = false` in .mido.toml",
+        Vec::<String>::new(),
+    ));
+
+    let final_verdict = verdict(&results);
+
+    assert!(final_verdict.contains("size=FAIL"), "{final_verdict}");
+    assert!(!final_verdict.contains("mutation"), "{final_verdict}");
+    assert_eq!(exit_code(&results), 1);
+}
+
+#[test]
+fn the_verdict_panel_names_the_gate_the_config_waived() {
+    let printed = render_verdict(SHIP_READY, &["mutation"], Style::plain());
+
+    assert!(printed.contains("SHIP-READY"), "{printed}");
+    assert!(printed.contains("waived: mutation"), "{printed}");
+    assert!(printed.contains("enabled = false"), "{printed}");
+}
+
+#[test]
+fn a_verdict_without_a_waiver_says_nothing_about_one() {
+    assert!(!render_verdict(SHIP_READY, &[], Style::plain()).contains("waived"));
+}
+
+#[test]
 fn the_verdict_panel_paints_by_outcome() {
-    let shipped = render_verdict(SHIP_READY, Style::colored());
-    let blocked = render_verdict("BLOCKED — size=FAIL", Style::colored());
+    let shipped = render_verdict(SHIP_READY, &[], Style::colored());
+    let blocked = render_verdict("BLOCKED — size=FAIL", &[], Style::colored());
 
     assert!(
         shipped.contains("\u{1b}[32mSHIP-READY\u{1b}[0m"),

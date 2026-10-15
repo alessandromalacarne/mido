@@ -28,6 +28,7 @@ coverage_min     = 80   # percent total line coverage of the measured target
 total_drop_max   = 0    # percentage points of total coverage you tolerate losing
 
 [mutation]
+# enabled     = false          # waive the gate: it reports SKIPPED, runs nothing, the verdict names it
 command       = ["cargo", "mutants", "-j2"]
 in_diff       = true           # scope the sweep to the change: mutation is the slow gate
 timeout_secs  = 3600

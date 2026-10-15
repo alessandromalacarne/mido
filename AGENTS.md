@@ -62,7 +62,10 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
 
 ## Hard rules (the product's contract)
 
-- A skipped gate is not a passed gate; `INCOMPLETE` is never a pass.
+- A skipped gate is not a passed gate: `enabled = false` is a waiver the ladder
+  reports as `SKIPPED`, runs nothing for, and names wherever the verdict is
+  printed — that exit code is the configured ladder's, never a claim about the
+  gate left out. `INCOMPLETE` is never a pass.
 - Unknown config keys, wrong types and malformed commands are config errors —
   a typo must never silently disable a gate or move a threshold.
 - Gates never fall back silently: an unsupported tool is `INCOMPLETE`, and the
