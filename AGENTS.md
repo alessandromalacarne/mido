@@ -12,7 +12,7 @@ is the real config, and the runner is `src/main.rs`.
 - `cargo fmt` and `cargo clippy --all-targets --all-features -- -D warnings` — what the syntax gate checks.
 - `cargo run -- --list-targets` / `cargo run -- --gate size` — run the ladder against this repo.
 - `nix develop` — the dev shell with every gate tool (`tokei`, `rust-code-analysis`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, `nodejs`). When `cargo` is not on `PATH`, gate commands are wrapped in `nix develop -c …` automatically.
-- Mutation runs as `cargo mutants -j2` with `.cargo/mutants.toml` (nextest, `profile = "mutants"`) and `[profile.mutants]` in `Cargo.toml`. By default the sweep is scoped to the change: mido writes a git diff (merge base with the default branch up to the working tree, untracked sources included) and passes `--in-diff`; `in_diff = false` in `[mutation]` sweeps the whole package. The gate gives every run its own `--output` directory under the run scratch, so a verdict can only ever be decided by the mutants that run tested — a previous run's `mutants.out` (or an `--iterate` on the configured command) is never read. It drives every test command the target declares, one pass each, later passes with `--iterate`: the in-run union means skipped counts as killed, and the evidence says so. Counts come from the run's `outcomes.json`; a mutant with no verdict (timed out) is INCOMPLETE.
+- Mutation runs as `cargo mutants -j2` with `.cargo/mutants.toml` (nextest, `profile = "mutants"`) and `[profile.mutants]` in `Cargo.toml`. By default the sweep is scoped to the change: mido writes a git diff (the working tree against `HEAD`, untracked sources included) and passes `--in-diff`; `in_diff = false` in `[mutation]` sweeps the whole package. The gate gives every run its own `--output` directory under the run scratch, so a verdict can only ever be decided by the mutants that run tested — a previous run's `mutants.out` (or an `--iterate` on the configured command) is never read. It drives every test command the target declares, one pass each, later passes with `--iterate`: the in-run union means skipped counts as killed, and the evidence says so. Counts come from the run's `outcomes.json`; a mutant with no verdict (timed out) is INCOMPLETE.
 
 ## Architecture
 
@@ -110,8 +110,9 @@ Anything bigger than a one-line chore goes through the repo workflow:
 - Ladder order: `syntax → size → analysis → tests → coverage → mutation`.
 - Verdicts: `PASS`, `FAIL`, `INCOMPLETE`, `SKIPPED`; exit codes `0` SHIP-READY,
   `1` FAIL, `2` INCOMPLETE or a setup error.
-- Mutation is scoped to the change by default: `--in-diff` on a git-generated
-  diff; `in_diff = false` in `[mutation]` sweeps the whole package.
+- Mutation is scoped to the change by default: `--in-diff` on a `git diff HEAD`
+  mido writes (untracked sources included), so committed work is out of scope;
+  `in_diff = false` in `[mutation]` sweeps the whole package.
 - Size ceilings (`.mido.toml`): file 300 warn / 500 fail code lines, function
   40/60 sloc, complexity 10/15, nesting 3/4 (per file in the node modules, where
   eslint's `max-depth` counts blocks). Keep new modules under the warn band and
