@@ -111,6 +111,17 @@ impl MutationStub {
             .collect()
     }
 
+    /// The argv of every git query, in order.
+    pub(super) fn git_calls(&self) -> Vec<Vec<String>> {
+        self.runner
+            .calls
+            .borrow()
+            .iter()
+            .filter(|call| call.args.first().map(String::as_str) == Some("git"))
+            .map(|call| call.args.clone())
+            .collect()
+    }
+
     /// Rebuild the runner: the test's answers first, then the stub's own.
     fn rebuild(&mut self) {
         let mut responses: Vec<(String, Outcome)> = self

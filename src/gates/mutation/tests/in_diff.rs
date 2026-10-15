@@ -14,11 +14,7 @@ fn the_pass_is_scoped_to_the_change_diff() {
         total: 3,
         caught: 3,
         ..Pass::default()
-    })])
-    .answers(&[
-        ("rev-parse --verify", 0, "c0ffee\n"),
-        ("merge-base", 0, "c0ffee\n"),
-    ]);
+    })]);
 
     let files = files();
     let config = config_for(&repo);
@@ -27,8 +23,9 @@ fn the_pass_is_scoped_to_the_change_diff() {
 
     assert_eq!(result.status, PASS);
     assert!(
-        stub.called_with("git diff c0ffee"),
-        "the change is the diff from the merge base with the default branch"
+        stub.called_exactly(&["git", "diff", "HEAD"]),
+        "the change is the working tree against the last commit: {:?}",
+        stub.git_calls()
     );
     let diff = diff_path(&run);
     let written = std::fs::read_to_string(&diff).expect("the diff file is written");
@@ -40,6 +37,24 @@ fn the_pass_is_scoped_to_the_change_diff() {
         stub.mutant_calls()
     );
     assert!(result.contract.contains("--in-diff"), "{}", result.contract);
+}
+
+#[test]
+fn the_scope_never_consults_a_branch() {
+    let repo = repo();
+    let stub = MutationStub::new(vec![Some(Pass {
+        total: 3,
+        caught: 3,
+        ..Pass::default()
+    })]);
+
+    gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
+
+    assert!(
+        !stub.called_with("rev-parse") && !stub.called_with("merge-base"),
+        "the base is the last commit, never a branch: {:?}",
+        stub.git_calls()
+    );
 }
 
 #[test]

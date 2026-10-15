@@ -434,19 +434,20 @@ Mutation testing is by far the most expensive gate: a full sweep builds and
 tests every mutant in the package, which on a real crate is minutes to hours,
 while what a handoff needs to know is whether the tests catch broken code in
 *what changed*. So `[mutation] in_diff` defaults to `true` and every pass runs
-`cargo-mutants --in-diff <file>` on a diff mido generates with git: the merge
-base with the repo's default branch (`origin/HEAD`, else `origin/main`,
-`origin/master`, `main`, `master`; `HEAD` when none resolves) up to the working
-tree, untracked source files included, scoped to the target by a pathspec. The
-kill rate — and the verdict — are decided by the mutants the change touches, so
-the gate's cost scales with the change, not with the package.
+`cargo-mutants --in-diff <file>` on a diff mido generates with git: the working
+tree against `HEAD` — the last commit — untracked source files included, scoped
+to the target by a pathspec. Committed work is no part of the change: the sweep
+pays for what is uncommitted, never for what the branch carries since some
+default branch. The kill rate — and the verdict — are decided by the mutants the
+change touches, so the gate's cost scales with the change, not with the package.
 
-A change that touches no rust file of the target passes with that stated as its
-evidence ("no rust file in the change"); a rust file whose changed lines yield no
-mutant (comments only) is INCOMPLETE, never a silent pass — a scope mistake can
-never hide behind a green mutation gate. Set `in_diff = false` to sweep the whole
-target; a command that names its own `--in-diff` is a conflict (INCOMPLETE)
-unless the switch is off, so the two scopes never fight.
+An empty change (everything committed) or one that touches no rust file of the
+target passes with that stated as its evidence ("no rust file in the change"); a
+rust file whose changed lines yield no mutant (comments only) is INCOMPLETE, never
+a silent pass — a scope mistake can never hide behind a green mutation gate. Set
+`in_diff = false` to sweep the whole target; a command that names its own
+`--in-diff` is a conflict (INCOMPLETE) unless the switch is off, so the two scopes
+never fight.
 
 The scope is rust's: `--in-diff` is a cargo-mutants flag, and stryker has no
 equivalent (it scopes through the `mutate` globs in its own config). So the node

@@ -54,36 +54,3 @@ pub fn all_files(runner: &dyn Runner, repo: &Path) -> Vec<String> {
     files.dedup();
     files
 }
-
-/// The refs a default branch can go by, best first: the remote's own HEAD,
-/// then the names it usually points at.
-const DEFAULT_BRANCHES: [&str; 5] = [
-    "origin/HEAD",
-    "origin/main",
-    "origin/master",
-    "main",
-    "master",
-];
-
-/// The revision a change diff is taken from: the merge base with the repo's
-/// default branch when one resolves, `HEAD` when none does — so committed
-/// branch work and uncommitted work both count as the change.
-pub fn change_base(runner: &dyn Runner, repo: &Path) -> String {
-    for candidate in DEFAULT_BRANCHES {
-        if git(
-            runner,
-            repo,
-            &["rev-parse", "--verify", "--quiet", candidate],
-        )
-        .trim()
-        .is_empty()
-        {
-            continue;
-        }
-        let base = git(runner, repo, &["merge-base", "HEAD", candidate]);
-        if !base.trim().is_empty() {
-            return base.trim().to_string();
-        }
-    }
-    "HEAD".to_string()
-}

@@ -17,6 +17,12 @@ Notable changes to `mido-guard` — the `mido` binary. The format follows
   report's header. A green run with a waiver is never read as a green run
   without one. `INCOMPLETE` keeps exit code `2`: a gate that could not run is
   never green.
+- **The mutation scope is the working tree against `HEAD`.** A default run
+  (`in_diff = true`) no longer hunts for a default branch: mido writes
+  `git diff HEAD` — untracked sources included, the target scoped by a pathspec —
+  and passes it as `--in-diff`. The sweep is the change at hand, never the
+  commits a branch carries since `origin/HEAD` or `master`; a run with nothing
+  uncommitted passes with "no rust file in the change" as its evidence.
 
 ## [0.4.0] - 2026-10-14
 
