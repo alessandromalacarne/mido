@@ -16,19 +16,21 @@ pub(super) struct ChangeScope {
     pub(super) has_source: bool,
 }
 
-/// Write the change diff cargo-mutants scopes a default run to: the merge base
-/// with the repo's default branch up to the working tree, untracked sources
-/// included.
+/// The revision a change diff is taken from: the last commit. Committed work is
+/// not the change — the sweep pays only for the working tree.
+const CHANGE_BASE: &str = "HEAD";
+
+/// Write the change diff cargo-mutants scopes a default run to: the working
+/// tree against `HEAD`, untracked sources included.
 pub(super) fn change_scope(
     runner: &dyn Runner,
     run: &GateRun<'_>,
     lang: Lang,
 ) -> Result<ChangeScope, GuardrailsError> {
     let (repo, target) = (run.repo, run.target);
-    let base = process::change_base(runner, repo);
     let untracked = untracked_sources(runner, repo, target, lang);
     stage_untracked(runner, repo, &untracked);
-    let diff = diff_text(runner, repo, target, &base);
+    let diff = diff_text(runner, repo, target);
     release_untracked(runner, repo, &untracked);
 
     let path = run
@@ -62,8 +64,8 @@ fn holds_source(diff: &str, run: &GateRun<'_>, lang: Lang) -> bool {
 /// The diff itself: root-relative paths, the target scoped by a pathspec —
 /// cargo-mutants resolves `--in-diff` paths against the cargo workspace root,
 /// not the directory it runs in.
-fn diff_text(runner: &dyn Runner, repo: &Path, target: &Target, base: &str) -> String {
-    let mut args = vec!["diff".to_string(), base.to_string()];
+fn diff_text(runner: &dyn Runner, repo: &Path, target: &Target) -> String {
+    let mut args = vec!["diff".to_string(), CHANGE_BASE.to_string()];
     if !target.path.is_empty() {
         args.push("--".to_string());
         args.push(target.path.clone());

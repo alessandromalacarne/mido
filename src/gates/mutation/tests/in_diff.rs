@@ -14,11 +14,7 @@ fn the_pass_is_scoped_to_the_change_diff() {
         total: 3,
         caught: 3,
         ..Pass::default()
-    })])
-    .answers(&[
-        ("rev-parse --verify", 0, "c0ffee\n"),
-        ("merge-base", 0, "c0ffee\n"),
-    ]);
+    })]);
 
     let files = files();
     let config = config_for(&repo);
@@ -27,8 +23,9 @@ fn the_pass_is_scoped_to_the_change_diff() {
 
     assert_eq!(result.status, PASS);
     assert!(
-        stub.called_with("git diff c0ffee"),
-        "the change is the diff from the merge base with the default branch"
+        stub.called_exactly(&["git", "diff", "HEAD"]),
+        "the change is the working tree against the last commit: {:?}",
+        stub.git_calls()
     );
     let diff = diff_path(&run);
     let written = std::fs::read_to_string(&diff).expect("the diff file is written");
