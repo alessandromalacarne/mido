@@ -4,6 +4,20 @@ Notable changes to `mido-guard` — the `mido` binary. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **A config waiver is a gate the ladder leaves out, not a gate that blocks it.**
+  `enabled = false` on any gate runs nothing, still reports `SKIPPED`, and no
+  longer stands in the way: the verdict is `SHIP-READY` and the exit code `0`
+  when every gate that ran passed, with the waiver named next to it — a `waived:
+  mutation — enabled = false in .mido.toml` row under the verdict panel, a
+  `waived` list in the `--json` verdict, and the same line in the markdown
+  report's header. A green run with a waiver is never read as a green run
+  without one. `INCOMPLETE` keeps exit code `2`: a gate that could not run is
+  never green.
+
 ## [0.4.0] - 2026-10-14
 
 The npm modules measure with eslint, each language module carries its own
