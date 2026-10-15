@@ -1,5 +1,5 @@
 use super::*;
-use crate::report::FAIL;
+use crate::report::{FAIL, SKIPPED};
 use crate::test_support::sample_results;
 
 #[test]
@@ -81,6 +81,25 @@ fn failure_report_flags_incomplete_gates_as_not_passed() {
     assert!(report.contains("mutation"));
     assert!(report.contains("INCOMPLETE"));
     assert!(report.contains("never a pass"));
+}
+
+#[test]
+fn failure_report_leaves_out_the_gate_the_config_waived() {
+    let mut results = sample_results();
+    results.push(GateResult::new(
+        "mutation",
+        SKIPPED,
+        "`enabled = false` in .mido.toml",
+        Vec::<String>::new(),
+    ));
+
+    let report = render_failure(&results, &FailureContext::default(), Style::plain());
+
+    assert!(report.contains("│ failing  1 of 4 gates"), "{report}");
+    assert!(
+        !report.contains("mutation"),
+        "a waived gate did not stand in the way: {report}"
+    );
 }
 
 #[test]

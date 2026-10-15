@@ -213,6 +213,55 @@ fn a_passing_run_writes_the_report_and_says_so() {
 }
 
 #[test]
+fn a_gate_the_config_waives_does_not_block_the_run() {
+    let repo = MiniRepo::build(Some(
+        "
+            version = 1
+
+            [tests]
+            command = [\"cargo\", \"test\"]
+
+            [mutation]
+            enabled = false
+        ",
+    ));
+    let report = repo.root.join("report.md");
+    let runner = repo_runner(
+        "lib/src/foo.rs\n",
+        (0, "test result: ok. 3 passed; 0 failed\n"),
+    );
+
+    let (code, out, _) = run(
+        &[
+            "--repo",
+            &repo.root.to_string_lossy(),
+            "--gate",
+            "tests",
+            "--gate",
+            "mutation",
+            "--report",
+            &report.to_string_lossy(),
+            "--json",
+        ],
+        &runner,
+    );
+
+    assert_eq!(code, 0, "a written-down waiver does not block: {out}");
+    assert!(out.contains("│ SHIP-READY"), "{out}");
+    assert!(out.contains("· mutation"), "{out}");
+    assert!(out.contains("waived: mutation"), "{out}");
+    assert!(out.contains("\"waived\":[\"mutation\"]"), "{out}");
+    assert!(
+        !runner.called_with("cargo mutants"),
+        "a waived gate runs nothing: {:?}",
+        runner.calls.borrow().len()
+    );
+    let markdown = std::fs::read_to_string(&report).expect("report");
+    assert!(markdown.contains("VERDICT: SHIP-READY"), "{markdown}");
+    assert!(markdown.contains("waived: mutation"), "{markdown}");
+}
+
+#[test]
 fn a_failing_gate_exits_1_with_the_failure_report_on_stdout() {
     let repo = MiniRepo::build(tests_config());
     let runner = repo_runner(

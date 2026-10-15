@@ -49,6 +49,10 @@ fn a_disabled_gate_reports_itself_as_skipped() {
         printed.contains("[1/1] · mutation"),
         "a skipped gate still gets a line: {printed:?}"
     );
+    assert!(
+        printed.contains("waived"),
+        "the line says the config waived it: {printed:?}"
+    );
 }
 
 #[test]
