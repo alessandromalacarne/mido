@@ -40,6 +40,24 @@ fn the_pass_is_scoped_to_the_change_diff() {
 }
 
 #[test]
+fn the_scope_never_consults_a_branch() {
+    let repo = repo();
+    let stub = MutationStub::new(vec![Some(Pass {
+        total: 3,
+        caught: 3,
+        ..Pass::default()
+    })]);
+
+    gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
+
+    assert!(
+        !stub.called_with("rev-parse") && !stub.called_with("merge-base"),
+        "the base is the last commit, never a branch: {:?}",
+        stub.git_calls()
+    );
+}
+
+#[test]
 fn a_change_without_a_rust_file_passes_without_running_the_mutants() {
     let repo = repo();
     let stub = MutationStub::new(vec![]).change(&["README.md"]);
