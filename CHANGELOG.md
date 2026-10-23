@@ -6,6 +6,19 @@ Notable changes to `mido-guard` — the `mido` binary. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-23
+
+Release binaries, a one-line installer, and a waiver that no longer blocks.
+
+### Added
+
+- **Prebuilt release binaries and a `curl | sh` installer.** Every `v*` tag
+  publishes a statically linked `x86_64-unknown-linux-musl` archive with
+  `SHA256SUMS` and an `install.sh` that resolves the latest release, verifies
+  the checksum and installs to `~/.local/bin`. The same tag publishes to
+  crates.io, and CI builds the musl target on every push so the release path
+  cannot rot.
+
 ### Changed
 
 - **A config waiver is a gate the ladder leaves out, not a gate that blocks it.**

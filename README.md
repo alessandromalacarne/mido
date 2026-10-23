@@ -182,6 +182,23 @@ revision stamp: febf29d11eec8ddb2bdea1f5fb1d01524543dc34 | bddc06f72e892e557a404
 
 ## Install
 
+The release binary is statically linked and runs on any x86_64 Linux
+distribution. The installer resolves the latest release, verifies it against
+`SHA256SUMS`, and puts `mido` in `~/.local/bin` (override with
+`MIDO_INSTALL_DIR`):
+
+```sh
+curl -fsSL https://github.com/alessandromalacarne/mido/releases/latest/download/install.sh | sh
+```
+
+Every release also carries `mido-vX.Y.Z-x86_64-unknown-linux-musl.tar.gz` and
+`SHA256SUMS` on the [releases page](https://github.com/alessandromalacarne/mido/releases).
+Other platforms build from source with cargo:
+
+```sh
+cargo install mido-guard   # the binary is still `mido`
+```
+
 With Nix (the dev shell brings every gate tool along):
 
 ```sh
@@ -189,7 +206,7 @@ nix build          # the binary
 nix develop        # cargo, rustfmt, clippy, tokei, rust-code-analysis, cargo-llvm-cov, cargo-mutants, cargo-nextest, nodejs
 ```
 
-With cargo:
+From a checkout:
 
 ```sh
 cargo build --release

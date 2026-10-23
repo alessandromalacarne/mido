@@ -23,3 +23,27 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features
+
+  musl:
+    name: Static release build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install the musl target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-musl
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Check the binary is static
+        run: file target/x86_64-unknown-linux-musl/release/mido | grep -Eq 'statically linked|static-pie linked'

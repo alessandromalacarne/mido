@@ -1,9 +1,23 @@
 [package]
 name = "mido-guard"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Guardrails runner: the six-gate verification ladder described by .mido.toml"
 license = "MIT"
+repository = "https://github.com/alessandromalacarne/mido"
+homepage = "https://github.com/alessandromalacarne/mido"
+readme = "README.md"
+keywords = ["guardrails", "verification", "mutation-testing", "ci", "testing"]
+categories = ["development-tools", "development-tools::testing", "command-line-utilities"]
+include = [
+  "src/**",
+  "tests/**",
+  "Cargo.toml",
+  "Cargo.lock",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+]
 
 # The package is `mido-guard`; the command stays `mido` — the CLI, the docs and
 # the integration tests all name the binary, not the package.
