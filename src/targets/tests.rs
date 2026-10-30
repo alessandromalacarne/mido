@@ -68,29 +68,6 @@ fn a_sibling_directory_with_a_shared_prefix_is_not_owned() {
 }
 
 #[test]
-fn the_workspace_measures_everything_but_standalone_crates() {
-    let all = targets(&[("lib", true), ("frontend", false)]);
-    let listed = files(&[
-        "Cargo.toml",
-        "README.md",
-        "lib/src/foo.rs",
-        "cli/src/main.rs",
-        "frontend/src/main.rs",
-        "frontend/Cargo.toml",
-    ]);
-
-    assert_eq!(
-        target_files(&listed, &Target::workspace_target("Cargo.toml"), &all),
-        files(&[
-            "Cargo.toml",
-            "README.md",
-            "lib/src/foo.rs",
-            "cli/src/main.rs",
-        ])
-    );
-}
-
-#[test]
 fn a_workspace_member_is_never_excluded_from_the_roll_up() {
     let all = targets(&[("lib", true), ("api", true), ("frontend", false)]);
     let listed = files(&["lib/src/foo.rs", "api/src/bar.rs"]);

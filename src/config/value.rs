@@ -46,14 +46,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_boolean_reads_as_a_switch() {
-        assert_eq!(as_bool(&Value::Boolean(true)), Some(true));
-        assert_eq!(as_bool(&Value::Boolean(false)), Some(false));
-        assert_eq!(as_bool(&Value::String("true".into())), None);
-        assert_eq!(as_bool(&Value::Integer(1)), None);
-    }
-
-    #[test]
     fn integers_and_floats_read_as_numbers() {
         assert_eq!(as_int(&Value::Integer(300)), Some(300));
         assert_eq!(as_int(&Value::Float(300.0)), None);

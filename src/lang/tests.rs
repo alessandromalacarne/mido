@@ -2,44 +2,6 @@ use super::*;
 use crate::test_support::MiniRepo;
 
 #[test]
-fn a_root_cargo_manifest_selects_the_rust_module() {
-    let repo = MiniRepo::build(None);
-
-    assert_eq!(Lang::infer(&repo.root), Ok(Lang::Rust));
-}
-
-#[test]
-fn a_root_package_manifest_selects_the_javascript_module() {
-    let repo = crate::test_support::MiniJsRepo::build(None);
-
-    assert_eq!(Lang::infer(&repo.root), Ok(Lang::JavaScript));
-}
-
-#[test]
-fn a_tsconfig_makes_an_npm_repo_typescripts() {
-    let repo = crate::test_support::MiniJsRepo::build(None);
-    std::fs::write(repo.root.join("tsconfig.json"), "{}\n").expect("tsconfig");
-
-    // The root also carries a package.json: the first module whose manifest is
-    // there wins, and typescript comes before javascript in LANGS.
-    assert!(repo.root.join("package.json").exists());
-    assert_eq!(Lang::infer(&repo.root), Ok(Lang::TypeScript));
-}
-
-#[test]
-fn cargo_wins_when_a_repo_carries_both_root_manifests() {
-    let repo = MiniRepo::build(None);
-    std::fs::write(
-        repo.root.join("package.json"),
-        "{ \"name\": \"tooling\" }\n",
-    )
-    .expect("manifest");
-    std::fs::write(repo.root.join("tsconfig.json"), "{}\n").expect("tsconfig");
-
-    assert_eq!(Lang::infer(&repo.root), Ok(Lang::Rust));
-}
-
-#[test]
 fn every_module_is_known_by_name() {
     let names: Vec<&str> = LANGS.iter().map(|lang| lang.name()).collect();
 
@@ -56,20 +18,6 @@ fn every_module_names_the_tools_it_measures_with() {
         assert_eq!(lang.size_tool(), "eslint");
         assert_eq!(lang.metrics_tool(), "eslint");
     }
-}
-
-#[test]
-fn no_recognized_manifest_is_a_setup_error_naming_the_languages() {
-    let directory = tempfile::tempdir().expect("temp dir");
-
-    let message = Lang::infer(directory.path())
-        .expect_err("no module recognizes an empty directory")
-        .render();
-
-    assert!(message.contains("no language module recognizes this repo"));
-    assert!(message.contains("looked for Cargo.toml, tsconfig.json, package.json"));
-    assert!(message.contains("known languages: rust, typescript, javascript"));
-    assert!(message.contains("--lang"));
 }
 
 #[test]

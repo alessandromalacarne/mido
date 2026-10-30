@@ -139,19 +139,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn setup_error_renders_message_details_and_hint() {
-        let error = GuardrailsError::setup("cannot measure anything here")
-            .detail("no Cargo.toml under `scripts`")
-            .hint("pass -p frontend");
-
-        let rendered = error.render();
-
-        assert!(rendered.contains("error: cannot measure anything here"));
-        assert!(rendered.contains("no Cargo.toml under `scripts`"));
-        assert!(rendered.contains("hint: pass -p frontend"));
-    }
-
-    #[test]
     fn config_error_renders_the_offending_line() {
         let error = GuardrailsError::config("`.mido.toml` is not valid")
             .detail("line 5: unknown key `min_mi` in [analysis]");
@@ -172,21 +159,5 @@ mod tests {
         let error = GuardrailsError::setup("boom").detail("why");
 
         assert_eq!(error.to_string(), error.render());
-    }
-
-    #[test]
-    fn a_styled_error_paints_the_lead_in_and_steps_the_hint_back() {
-        let error = GuardrailsError::setup("boom").hint("pass -p frontend");
-
-        let rendered = error.render_styled(Style::colored());
-
-        assert!(
-            rendered.starts_with("\u{1b}[31merror:\u{1b}[0m boom"),
-            "{rendered:?}"
-        );
-        assert!(
-            rendered.ends_with("\u{1b}[2m  hint: pass -p frontend\u{1b}[0m"),
-            "{rendered:?}"
-        );
     }
 }

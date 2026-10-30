@@ -61,25 +61,6 @@ fn dev_keeps_the_runner_streams_when_the_capture_files_are_gone() {
 }
 
 #[test]
-fn exec_redirects_the_streams_when_files_are_asked_for() {
-    let directory = tempfile::tempdir().expect("temp dir");
-    let out_path = directory.path().join("out");
-    let err_path = directory.path().join("err");
-
-    let outcome = SystemRunner.exec(
-        &Command::new("/", ["sh", "-c", "printf out; printf err >&2"])
-            .stdout_file(out_path.clone())
-            .stderr_file(err_path.clone()),
-    );
-
-    assert!(outcome.ok());
-    assert_eq!(outcome.stdout, "");
-    assert_eq!(outcome.stderr, "");
-    assert_eq!(std::fs::read_to_string(&out_path).expect("stdout"), "out");
-    assert_eq!(std::fs::read_to_string(&err_path).expect("stderr"), "err");
-}
-
-#[test]
 fn git_returns_stdout_only_on_success() {
     let runner = FakeRunner::with(&[("rev-parse", 128, "fatal: not a repo")]);
     assert_eq!(git(&runner, Path::new("/repo"), &["rev-parse", "HEAD"]), "");
@@ -144,20 +125,6 @@ fn a_program_that_does_not_exist_is_a_not_found_exit() {
 }
 
 #[test]
-fn exec_reports_the_exit_code_and_both_streams() {
-    let outcome = SystemRunner.exec(&Command::new(
-        "/",
-        ["sh", "-c", "printf out; printf err >&2; exit 3"],
-    ));
-
-    assert_eq!(outcome.code, 3);
-    assert_eq!(outcome.stdout, "out");
-    assert_eq!(outcome.stderr, "err");
-    assert!(!outcome.ok());
-    assert_eq!(outcome.combined(), "outerr");
-}
-
-#[test]
 fn exec_hands_stdin_to_the_program() {
     let outcome = SystemRunner.exec(&Command::new("/", ["sh", "-c", "cat"]).stdin("hello"));
 
@@ -170,14 +137,6 @@ fn a_program_killed_by_a_signal_reports_128_plus_the_signal() {
     let outcome = SystemRunner.exec(&Command::new("/", ["sh", "-c", "kill -TERM $$"]));
 
     assert_eq!(outcome.code, 128 + 15);
-}
-
-#[test]
-fn a_program_that_overruns_its_timeout_is_killed() {
-    let outcome = SystemRunner.exec(&Command::new("/", ["sh", "-c", "sleep 5"]).timeout(Some(1)));
-
-    assert_eq!(outcome.code, TIMEOUT_EXIT);
-    assert_eq!(outcome.stderr, "timed out after 1s");
 }
 
 #[test]

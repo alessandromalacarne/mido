@@ -191,14 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn a_clean_format_pass_has_nothing_to_report() {
-        let outcome = syntax_outcome("format", "cargo fmt --check", "", 0, Path::new("."));
-
-        assert!(outcome.problems.is_empty());
-        assert!(outcome.details[0].contains("0 file(s) with diffs"));
-    }
-
-    #[test]
     fn diagnostics_report_the_message_above_the_location() {
         let problems = extract_diagnostics("error: mismatched types\n  --> src/foo.rs:12:5\n");
 

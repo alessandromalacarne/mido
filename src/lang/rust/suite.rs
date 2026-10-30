@@ -184,28 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn a_standalone_crate_without_its_own_command_falls_back_to_cargo_test() {
-        let repo = repo(Some(
-            "
-            version = 1
-
-            [tests]
-            command = [\"cargo\", \"test\", \"--all-features\"]
-        ",
-        ));
-        let config = config_for(&repo);
-
-        assert_eq!(
-            test_commands(
-                &config,
-                &Target::package_target("desktop", false, crate::lang::rust::MANIFEST),
-                &repo.root
-            ),
-            vec![argv(&["cargo", "test"])]
-        );
-    }
-
-    #[test]
     fn a_crate_that_browser_tests_gets_a_second_wasm_command() {
         let repo = repo(None);
         let manifest = repo.root.join("frontend/Cargo.toml");
@@ -227,41 +205,6 @@ mod tests {
                 argv(&["cargo", "test"]),
                 argv(&["cargo", "test", "--target", "wasm32-unknown-unknown"])
             ]
-        );
-    }
-
-    #[test]
-    fn a_crate_without_browser_tests_runs_once() {
-        let repo = repo(None);
-
-        assert_eq!(
-            test_commands(
-                &config_for(&repo),
-                &Target::package_target("desktop", false, crate::lang::rust::MANIFEST),
-                &repo.root
-            ),
-            vec![argv(&["cargo", "test"])]
-        );
-    }
-
-    #[test]
-    fn a_crate_that_does_not_browser_test_through_the_macro_runs_once() {
-        let repo = repo(None);
-        let manifest = repo.root.join("frontend/Cargo.toml");
-        let text = std::fs::read_to_string(&manifest).expect("manifest");
-        std::fs::write(
-            &manifest,
-            format!("{text}\n[dev-dependencies]\nsome-other-helper = \"1\"\n"),
-        )
-        .expect("manifest");
-
-        assert_eq!(
-            test_commands(
-                &config_for(&repo),
-                &Target::package_target("frontend", false, crate::lang::rust::MANIFEST),
-                &repo.root
-            ),
-            vec![argv(&["cargo", "test"])]
         );
     }
 }

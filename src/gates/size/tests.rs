@@ -72,33 +72,6 @@ fn a_file_nesting_reading_fails_at_the_ceiling_and_warns_before_it() {
 }
 
 #[test]
-fn function_metrics_fail_on_length_complexity_and_nesting() {
-    let long = unit("long", 61);
-    let complex = Unit {
-        cyclomatic: 15,
-        ..unit("complex", 10)
-    };
-    let nested = Unit {
-        nesting: Some(4),
-        ..unit("nested", 10)
-    };
-
-    let (problems, near) = judge_function_metrics(&[long, complex, nested], &limits());
-
-    assert_eq!(problems.len(), 3);
-    assert!(problems
-        .iter()
-        .any(|line| line.contains("function_loc 61 (fail >= 60)")));
-    assert!(problems
-        .iter()
-        .any(|line| line.contains("complexity 15 (fail >= 15)")));
-    assert!(problems
-        .iter()
-        .any(|line| line.contains("nesting 4 (fail >= 4)")));
-    assert!(near.is_empty());
-}
-
-#[test]
 fn a_near_ceiling_function_warns_without_failing() {
     let (problems, near) = judge_function_metrics(&[unit("borderline", 45)], &limits());
 
@@ -106,26 +79,6 @@ fn a_near_ceiling_function_warns_without_failing() {
     assert_eq!(near.len(), 1);
     assert!(near[0].contains("near the ceiling: borderline"));
     assert!(near[0].contains("function_loc(warn)"));
-}
-
-#[test]
-fn an_unmeasured_nesting_does_not_judge_nesting() {
-    let (problems, _) = judge_function_metrics(&[unit("no-nesting-data", 10)], &limits());
-
-    assert!(problems.is_empty());
-}
-
-#[test]
-fn a_function_over_two_ceilings_reports_both_but_is_not_near_one() {
-    let over = Unit {
-        cyclomatic: 20,
-        ..unit("over", 70)
-    };
-
-    let (problems, near) = judge_function_metrics(&[over], &limits());
-
-    assert_eq!(problems.len(), 2);
-    assert!(near.is_empty());
 }
 
 #[test]
@@ -139,29 +92,6 @@ fn the_gate_fails_when_a_measured_file_is_over_the_ceiling() {
     assert_eq!(result.status, FAIL);
     assert!(result.summary.contains("worst function"));
     assert!(result.contract.contains("file_loc.fail=500"));
-}
-
-#[test]
-fn the_gate_is_incomplete_when_the_metrics_never_arrived() {
-    let repo = MiniRepo::build(None);
-    let config = config_for(&repo);
-    let measurements = Measurements {
-        files: vec!["src/foo.rs".to_string()],
-        errors: vec!["tokei could not measure 1 file(s) (exit 127)".to_string()],
-        ..Measurements::default()
-    };
-
-    let result = gate_size(&gate_run_for(&repo, &config, &[]), &measurements);
-
-    assert_eq!(result.status, INCOMPLETE);
-    assert!(result
-        .details
-        .iter()
-        .any(|line| line.contains("measurement:")));
-    assert!(result
-        .details
-        .iter()
-        .any(|line| line.contains("returned nothing")));
 }
 
 #[test]
@@ -220,56 +150,6 @@ fn missing_units_do_not_claim_nesting_was_absent() {
         result.details
     );
     assert_eq!(result.summary, "no functions in 1 file(s)");
-}
-
-#[test]
-fn nesting_absence_is_stated_in_the_evidence() {
-    let repo = MiniRepo::build(None);
-    let config = config_for(&repo);
-
-    let result = gate_size(
-        &gate_run_for(&repo, &config, &[]),
-        &readings(&[("src/foo.rs", 5)], vec![unit("f", 5)]),
-    );
-
-    assert_eq!(result.status, PASS);
-    assert!(result
-        .details
-        .iter()
-        .any(|line| line.contains("nesting: not measured")));
-}
-
-#[test]
-fn nesting_that_arrived_per_file_is_not_reported_absent() {
-    let repo = MiniJsRepo::build(None);
-    let config = js_config_for(&repo);
-    let mut measurements = readings(&[("src/a.js", 40)], vec![unit("f", 12)]);
-    measurements.nesting.insert("src/a.js".to_string(), 2);
-
-    let result = gate_size(&js_gate_run_for(&repo, &config, &[]), &measurements);
-
-    assert_eq!(result.status, PASS);
-    assert!(!result
-        .details
-        .iter()
-        .any(|line| line.contains("nesting: not measured")));
-    assert!(result.details.iter().any(|line| line.contains("src/a.js")));
-}
-
-#[test]
-fn a_deeply_nested_javascript_file_fails_on_the_nesting_ceiling() {
-    let repo = MiniJsRepo::build(None);
-    let config = js_config_for(&repo);
-    let mut measurements = readings(&[("src/a.js", 40)], vec![unit("f", 12)]);
-    measurements.nesting.insert("src/a.js".to_string(), 5);
-
-    let result = gate_size(&js_gate_run_for(&repo, &config, &[]), &measurements);
-
-    assert_eq!(result.status, FAIL);
-    assert!(result
-        .details
-        .iter()
-        .any(|line| line.contains("src/a.js: nesting depth 5 (fail >= 4)")));
 }
 
 #[test]

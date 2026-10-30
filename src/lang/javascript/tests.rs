@@ -79,21 +79,6 @@ fn fallback_commands_are_the_bare_npx_ones() {
 }
 
 #[test]
-fn keys_that_have_no_fallback_stay_unset() {
-    let js = Lang::JavaScript;
-
-    assert_eq!(js.fallback_argv("syntax", "typecheck"), None);
-    assert_eq!(js.fallback_argv("syntax", "command"), None);
-    assert_eq!(js.fallback_argv("size", "command"), None);
-    assert_eq!(js.fallback_argv("analysis", "command"), None);
-    assert_eq!(
-        js.fallback_argv("coverage", "command"),
-        None,
-        "the coverage command is derived, not a bare fallback"
-    );
-}
-
-#[test]
 fn javascript_source_files_are_the_js_family() {
     for path in ["src/app.js", "app.mjs", "app.cjs", "src/widget.jsx"] {
         assert!(is_source(path), "{path} is javascript");

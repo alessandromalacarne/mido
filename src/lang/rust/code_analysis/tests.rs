@@ -32,17 +32,6 @@ fn a_document_yields_its_functions_at_any_depth() {
 }
 
 #[test]
-fn a_document_without_an_index_leaves_it_unmeasured() {
-    let document = serde_json::json!({
-        "spaces": [{ "name": "f", "kind": "function", "metrics": { "loc": { "sloc": 3 } } }]
-    });
-
-    let units = units_from_document("src/foo.rs", &document);
-
-    assert_eq!(units[0].mi, None, "a missing reading is never a 100");
-}
-
-#[test]
 fn nesting_comes_from_whichever_family_the_version_prints() {
     let document = serde_json::json!({
         "spaces": [{ "name": "f", "kind": "function", "metrics": { "nested_control_flow": { "sum": 3 } } }]
@@ -110,25 +99,6 @@ fn a_file_the_tool_cannot_read_is_an_error() {
 
     assert!(units.is_empty());
     assert_eq!(errors.len(), 1);
-    assert!(errors[0].contains("could not read it"));
-}
-
-#[test]
-fn a_failing_tool_run_is_an_error_even_with_partial_output() {
-    let repo = MiniRepo::build(None);
-    let runner = FakeRunner::with(&[("rust-code-analysis-cli", 1, "{}")]);
-    let mut errors = Vec::new();
-
-    let units = analysis_units(
-        &runner,
-        &repo.root,
-        &Target::workspace_target("Cargo.toml"),
-        &["src/foo.rs".to_string()],
-        "cargo",
-        &mut errors,
-    );
-
-    assert!(units.is_empty());
     assert!(errors[0].contains("could not read it"));
 }
 

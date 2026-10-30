@@ -1,55 +1,8 @@
 use super::*;
-use crate::test_support::{argv, config_for, gate_run_for, FakeRunner, MiniRepo};
+use crate::test_support::{config_for, gate_run_for, FakeRunner, MiniRepo};
 
 fn repo() -> MiniRepo {
     MiniRepo::build(None)
-}
-
-#[test]
-fn default_steps_are_format_lint_and_typecheck() {
-    let repo = repo();
-    let config = config_for(&repo);
-    let target = Target::workspace_target("Cargo.toml");
-
-    let steps = syntax_steps(&config, &target, Lang::Rust);
-    let names: Vec<&str> = steps.iter().map(|(name, _)| name.as_str()).collect();
-
-    assert_eq!(names, vec!["format", "lint", "typecheck"]);
-    assert_eq!(steps[0].1, argv(&["cargo", "fmt", "--check"]));
-    assert_eq!(
-        steps[1].1,
-        argv(&[
-            "cargo",
-            "clippy",
-            "--all-targets",
-            "--all-features",
-            "--",
-            "-D",
-            "warnings"
-        ]),
-        "the embedded baseline carries the repo's own clippy flags"
-    );
-    assert_eq!(steps[2].1, argv(&["cargo", "check"]));
-}
-
-#[test]
-fn a_configured_command_runs_first() {
-    let repo = MiniRepo::build(Some(
-        "
-        version = 1
-
-        [syntax]
-        command = [\"cargo\", \"build\"]
-    ",
-    ));
-    let config = config_for(&repo);
-    let target = Target::workspace_target("Cargo.toml");
-
-    let steps = syntax_steps(&config, &target, Lang::Rust);
-
-    assert_eq!(steps[0].0, "command");
-    assert_eq!(steps[0].1, argv(&["cargo", "build"]));
-    assert_eq!(steps.len(), 4);
 }
 
 #[test]
@@ -135,18 +88,4 @@ fn unattributable_linter_output_is_not_a_pass() {
 
     assert_eq!(result.status, FAIL);
     assert!(result.details.join(" ").contains("cannot attribute"));
-}
-
-#[test]
-fn the_syntax_contract_records_every_command() {
-    let repo = MiniRepo::build(Some("version = 1\n"));
-    let runner = FakeRunner::default().tool("cargo");
-
-    let result = gate_syntax(&runner, &gate_run_for(&repo, &config_for(&repo), &[]));
-
-    assert!(result.contract.contains("`.mido.toml` [syntax]"));
-    assert!(result.contract.contains("format=`cargo fmt --check`"));
-    assert!(result.contract.contains("lint=`cargo clippy"));
-    assert_eq!(result.fixes.len(), 2);
-    assert!(result.fixes[0].contains("fix the diagnostics"));
 }

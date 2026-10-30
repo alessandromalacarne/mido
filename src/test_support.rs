@@ -120,15 +120,6 @@ pub fn run_cli(argv: &[&str], runner: &FakeRunner) -> (i32, String, String) {
     )
 }
 
-/// A runner whose git answers list `files` and whose tests command answers `tests`.
-pub fn repo_runner(files: &str, tests: (i32, &str)) -> FakeRunner {
-    FakeRunner::with(&[
-        ("ls-files", 0, files),
-        ("hash-object", 0, "dirtyhash\n"),
-        ("cargo test", tests.0, tests.1),
-    ])
-}
-
 /// A `Runner` that answers from a needle table instead of spawning processes.
 #[derive(Default)]
 pub struct FakeRunner {
