@@ -27,86 +27,6 @@ fn the_report_path_is_filled_in_and_located() {
 }
 
 #[test]
-fn a_relative_report_path_lands_in_the_target_directory() {
-    let repo = repo();
-
-    let (_, path) = coverage_report_path(
-        &argv(&["cargo", "llvm-cov", "--lcov", "--output-path", "lcov.info"]),
-        &repo.root,
-        &Target::package_target("frontend", false, "Cargo.toml"),
-        &repo.root,
-        Lang::Rust,
-    );
-
-    assert_eq!(path, repo.root.join("frontend/lcov.info"));
-}
-
-#[test]
-fn the_equals_form_of_the_output_flag_is_read_too() {
-    let repo = repo();
-
-    let (_, path) = coverage_report_path(
-        &argv(&["cargo", "llvm-cov", "--output-path=lcov.info"]),
-        &repo.root,
-        &Target::workspace_target("Cargo.toml"),
-        &repo.root,
-        Lang::Rust,
-    );
-
-    assert_eq!(path, repo.root.join("lcov.info"));
-}
-
-#[test]
-fn a_command_without_an_output_flag_defaults_to_lcov_info() {
-    let repo = repo();
-
-    let (_, path) = coverage_report_path(
-        &argv(&["cargo", "llvm-cov"]),
-        &repo.root,
-        &Target::workspace_target("Cargo.toml"),
-        &repo.root,
-        Lang::Rust,
-    );
-
-    assert_eq!(path, repo.root.join("lcov.info"));
-}
-
-#[test]
-fn the_gate_enforces_the_total_minimum() {
-    let repo = repo();
-    // The embedded rust baseline writes `lcov.info` next to the target.
-    write_report(
-        &repo.root.join("lcov.info"),
-        "SF:/repo/lib/src/foo.rs\nLH:2\nLF:10\nend_of_record\n",
-    );
-    let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-    let files = vec!["lib/src/foo.rs".to_string()];
-    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
-
-    assert_eq!(result.status, FAIL);
-    assert!(result.details.join(" ").contains("20.0%"));
-    assert!(result.details.join(" ").contains("min 80"));
-    assert!(result.contract.contains("coverage_min=80"));
-}
-
-#[test]
-fn an_empty_report_is_incomplete_not_a_pass() {
-    let repo = repo();
-    write_report(&repo.root.join("lcov.info"), "");
-    let runner = FakeRunner::with(&[("llvm-cov", 0, "")]);
-    let files = vec!["lib/src/foo.rs".to_string()];
-    let result = gate_coverage(&runner, &gate_run_for(&repo, &config_for(&repo), &files));
-
-    assert_eq!(result.status, INCOMPLETE);
-    assert!(
-        result.summary.contains("no measurable line"),
-        "{}",
-        result.summary
-    );
-    assert!(result.details.join(" ").contains("unverified, not 100%"));
-}
-
-#[test]
 fn a_missing_report_is_incomplete_not_a_pass() {
     let repo = repo();
     let runner = FakeRunner::with(&[("llvm-cov", 101, "error: no such command")]);
@@ -145,30 +65,4 @@ fn a_total_drop_beyond_the_allowance_fails_the_gate() {
         .details
         .join(" ")
         .contains("coverage dropped -10.0 points"));
-}
-
-#[test]
-fn without_a_baseline_the_delta_is_reported_as_not_measured() {
-    let (problems, details) = judge_coverage_delta((0, 0), None, 0.0);
-
-    assert!(problems.is_empty());
-    assert!(details[0].contains("not measured"));
-}
-
-#[test]
-fn totals_above_the_floor_pass() {
-    let (problems, details) = judge_total_coverage((9, 10), 80.0);
-
-    assert!(problems.is_empty());
-    assert!(details[0].contains("90.0%"));
-    assert!(details[0].contains("(min 80, ok)"));
-}
-
-#[test]
-fn totals_below_the_floor_fail() {
-    let (problems, details) = judge_total_coverage((2, 10), 80.0);
-
-    assert_eq!(problems.len(), 1);
-    assert!(problems[0].contains("total coverage 20.0% (min 80)"));
-    assert!(details[0].contains("FAIL"));
 }

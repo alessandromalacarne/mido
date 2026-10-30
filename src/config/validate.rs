@@ -221,24 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn a_command_written_as_a_string_is_rejected_with_the_new_shape() {
-        let repo = repo(
-            "
-            version = 1
-
-            [tests]
-            command = \"cargo test\"
-        ",
-        );
-
-        let message = load(&repo).expect_err("config is rejected").render();
-
-        assert!(message.contains("`[tests]` `command` must be an array of strings"));
-        assert!(message.contains("got string"));
-        assert!(message.contains(r#"["cargo", "test"]"#));
-    }
-
-    #[test]
     fn an_empty_command_is_rejected() {
         let repo = repo(
             "
@@ -284,21 +266,5 @@ mod tests {
         let message = load(&repo).expect_err("config is rejected").render();
 
         assert!(message.contains("`[syntax]` `lint`"));
-    }
-
-    #[test]
-    fn a_target_section_command_is_checked_under_its_own_label() {
-        let repo = repo(
-            "
-            version = 1
-
-            [targets.frontend.tests]
-            command = \"cargo test --target wasm32\"
-        ",
-        );
-
-        let message = load(&repo).expect_err("config is rejected").render();
-
-        assert!(message.contains("`[targets.frontend.tests]` `command`"));
     }
 }

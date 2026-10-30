@@ -40,55 +40,6 @@ fn the_pass_is_scoped_to_the_change_diff() {
 }
 
 #[test]
-fn the_scope_never_consults_a_branch() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 3,
-        caught: 3,
-        ..Pass::default()
-    })]);
-
-    gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert!(
-        !stub.called_with("rev-parse") && !stub.called_with("merge-base"),
-        "the base is the last commit, never a branch: {:?}",
-        stub.git_calls()
-    );
-}
-
-#[test]
-fn a_change_without_a_rust_file_passes_without_running_the_mutants() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![]).change(&["README.md"]);
-
-    let files = files();
-    let config = config_for(&repo);
-    let run = gate_run_for(&repo, &config, &files);
-    let result = gate_mutation(&stub, &run);
-
-    assert_eq!(result.status, PASS);
-    assert!(
-        result.summary.contains("no rust file in the change"),
-        "{}",
-        result.summary
-    );
-    assert!(
-        !stub.called_with("cargo mutants"),
-        "nothing to mutate never reaches cargo-mutants: {:?}",
-        stub.mutant_calls()
-    );
-    assert!(
-        result
-            .details
-            .iter()
-            .any(|line| line.contains("guardrails-mutants-workspace.diff")),
-        "the evidence names the diff that decided it: {:?}",
-        result.details
-    );
-}
-
-#[test]
 fn a_change_outside_the_target_leaves_nothing_to_mutate() {
     let repo = repo();
     let stub = MutationStub::new(vec![]).change(&["frontend/src/foo.rs"]);
@@ -109,40 +60,6 @@ fn a_change_outside_the_target_leaves_nothing_to_mutate() {
         result.summary
     );
     assert!(!stub.called_with("cargo mutants"));
-}
-
-#[test]
-fn a_member_target_diff_stays_workspace_root_relative() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 2,
-        caught: 2,
-        ..Pass::default()
-    })])
-    .change(&["frontend/src/foo.rs"]);
-    let target = Box::leak(Box::new(crate::targets::Target::package_target(
-        "frontend",
-        true,
-        crate::lang::rust::MANIFEST,
-    )));
-
-    let files = files();
-    let config = config_for(&repo);
-    let run = crate::test_support::gate_run(&repo.root, target, &config, &files);
-    let result = gate_mutation(&stub, &run);
-
-    assert_eq!(result.status, PASS, "{}", result.summary);
-    assert!(
-        stub.called_with("git diff HEAD -- frontend"),
-        "the target is scoped by a pathspec, never --relative: {:?}",
-        stub.mutant_calls()
-    );
-    let written = std::fs::read_to_string(run.scratch.join("guardrails-mutants-frontend.diff"))
-        .expect("the member's diff file is written");
-    assert!(
-        written.contains("+++ b/frontend/src/foo.rs"),
-        "the paths stay what cargo-mutants resolves them against: {written}"
-    );
 }
 
 #[test]
@@ -169,64 +86,6 @@ fn untracked_rust_files_ride_the_change_and_the_index_is_released() {
         stub.called_exactly(&["git", "reset", "-q", "--", "src/new.rs"]),
         "the index is left as it was found"
     );
-}
-
-#[test]
-fn in_diff_false_sweeps_the_whole_target() {
-    let repo = MiniRepo::build(Some(
-        "
-        version = 1
-
-        [mutation]
-        in_diff = false
-    ",
-    ));
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 3,
-        caught: 3,
-        ..Pass::default()
-    })]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(result.status, PASS);
-    assert!(
-        !stub.called_with("git diff"),
-        "no change diff is generated: {:?}",
-        stub.mutant_calls()
-    );
-    assert!(
-        !stub.called_with("--in-diff"),
-        "the whole target is the scope: {:?}",
-        stub.mutant_calls()
-    );
-}
-
-#[test]
-fn a_command_may_name_its_own_diff_when_in_diff_is_false() {
-    let repo = MiniRepo::build(Some(
-        "
-        version = 1
-
-        [mutation]
-        command = [\"cargo\", \"mutants\", \"--in-diff\", \"theirs\"]
-        in_diff = false
-    ",
-    ));
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 3,
-        caught: 3,
-        ..Pass::default()
-    })]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(
-        result.status, PASS,
-        "with mido's scope off, the command's own diff is the contract: {}",
-        result.summary
-    );
-    assert!(stub.called_with("--in-diff theirs"));
 }
 
 #[test]

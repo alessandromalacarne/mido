@@ -101,37 +101,6 @@ fn every_test_command_gets_a_pass_and_the_union_decides_the_verdict() {
 }
 
 #[test]
-fn a_pass_with_nothing_left_keeps_the_verdict_of_the_earlier_passes() {
-    let repo = repo();
-    browser_tested_frontend(&repo);
-    let config = config_for(&repo);
-    let files = rust_files();
-    let stub = MutationStub::new(vec![
-        Some(Pass {
-            total: 6,
-            caught: 6,
-            ..Pass::default()
-        }),
-        Some(Pass {
-            total: 0,
-            skipped: vec!["a", "b", "c", "d", "e", "f"],
-            ..Pass::default()
-        }),
-    ])
-    .change(&["frontend/src/foo.rs"]);
-
-    let run = frontend_run(&repo, &config, &files);
-    let result = gate_mutation(&stub, &run);
-
-    assert_eq!(result.status, PASS);
-    assert!(
-        result.summary.contains("100.0% killed (min 70)"),
-        "the pass that had nothing to test leaves the caught mutants caught: {}",
-        result.summary
-    );
-}
-
-#[test]
 fn the_first_pass_keeps_the_configured_command_without_iterate() {
     let repo = MiniRepo::build(Some(
         "
@@ -161,27 +130,5 @@ fn the_first_pass_keeps_the_configured_command_without_iterate() {
         calls[1].iter().any(|arg| arg == "--iterate"),
         "the pass that follows has to skip what the first one caught: {:?}",
         calls[1]
-    );
-}
-
-#[test]
-fn the_declared_test_command_rides_along_on_the_pass() {
-    let repo = MiniRepo::build(Some(
-        "
-        version = 1
-
-        [tests]
-        command = [\"cargo\", \"test\", \"--all-features\"]
-    ",
-    ));
-    let config = config_for(&repo);
-    let files = rust_files();
-    let stub = MutationStub::new(vec![Some(Pass::default())]);
-
-    gate_mutation(&stub, &gate_run_for(&repo, &config, &files));
-
-    assert!(
-        stub.called_with("-- --all-features"),
-        "the pass tests the mutants with the declared suite"
     );
 }

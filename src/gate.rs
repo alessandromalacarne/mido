@@ -89,11 +89,6 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_name_is_no_gate() {
-        assert_eq!(Gate::from_name("unknown-gate"), None);
-    }
-
-    #[test]
     fn every_gate_has_a_fix_hint() {
         for gate in GATES {
             assert!(

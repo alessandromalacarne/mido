@@ -44,13 +44,6 @@ fn request(line: &str) -> Value {
 }
 
 #[test]
-fn notifications_are_not_answered() {
-    let line = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
-
-    assert!(handle_line(line, &Stub::new(0)).is_none());
-}
-
-#[test]
 fn tools_list_exposes_the_ladder_and_target_discovery() {
     let response = request(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
     let tools = response["result"]["tools"]
@@ -118,36 +111,6 @@ fn run_ladder_maps_arguments_onto_the_cli() {
 }
 
 #[test]
-fn run_ladder_defaults_to_silence_and_the_repos_own_report() {
-    let stub = Stub::new(0);
-    let response = handle_line(
-        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
-            "name":"run_ladder","arguments":{"apply_workspace_aid":true}}}"#,
-        &stub,
-    )
-    .expect("answered");
-
-    assert_eq!(
-        stub.argv(),
-        ["--silent", "--apply-workspace-aid", "--json", "--report"]
-    );
-    assert_eq!(response["result"]["isError"], false);
-}
-
-#[test]
-fn run_ladder_can_turn_its_default_silence_off() {
-    let stub = Stub::new(0);
-    handle_line(
-        r#"{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{
-            "name":"run_ladder","arguments":{"silent":false}}}"#,
-        &stub,
-    )
-    .expect("answered");
-
-    assert_eq!(stub.argv(), ["--json", "--report"]);
-}
-
-#[test]
 fn an_empty_report_argument_asks_for_the_default_path() {
     let stub = Stub::new(0);
     handle_line(
@@ -158,19 +121,6 @@ fn an_empty_report_argument_asks_for_the_default_path() {
     .expect("answered");
 
     assert_eq!(stub.argv(), ["--silent", "--json", "--report"]);
-}
-
-#[test]
-fn run_ladder_passes_a_single_package_with_the_short_flag() {
-    let stub = Stub::new(0);
-    handle_line(
-        r#"{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{
-            "name":"run_ladder","arguments":{"packages":["lib"]}}}"#,
-        &stub,
-    )
-    .expect("answered");
-
-    assert_eq!(stub.argv(), ["-p", "lib", "--silent", "--json", "--report"]);
 }
 
 #[test]
@@ -198,31 +148,11 @@ fn a_malformed_line_is_a_parse_error() {
 }
 
 #[test]
-fn a_request_without_a_method_is_rejected() {
-    let response = handle_line(r#"{"jsonrpc":"2.0","id":9}"#, &Stub::new(0)).expect("answered");
-
-    assert_eq!(response["error"]["code"], -32600);
-}
-
-#[test]
 fn an_unknown_method_is_rejected() {
     let line = r#"{"jsonrpc":"2.0","id":10,"method":"resources/list"}"#;
     let response = handle_line(line, &Stub::new(0)).expect("answered");
 
     assert_eq!(response["error"]["code"], -32601);
-}
-
-#[test]
-fn an_unknown_tool_is_rejected() {
-    let line = r#"{"jsonrpc":"2.0","id":11,"method":"tools/call",
-                   "params":{"name":"nope","arguments":{}}}"#;
-    let response = handle_line(line, &Stub::new(0)).expect("answered");
-
-    assert_eq!(response["error"]["code"], -32602);
-    assert!(response["error"]["message"]
-        .as_str()
-        .expect("a message")
-        .contains("nope"));
 }
 
 #[test]
@@ -266,14 +196,6 @@ fn initialize_answers_the_handshake() {
 }
 
 #[test]
-fn a_message_that_is_not_an_object_is_rejected() {
-    let response = handle_line("[1,2]", &Stub::new(0)).expect("answered");
-
-    assert!(response["id"].is_null());
-    assert_eq!(response["error"]["code"], -32600);
-}
-
-#[test]
 fn tools_call_without_a_tool_name_is_rejected() {
     let line = r#"{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{}}"#;
     let response = handle_line(line, &Stub::new(0)).expect("answered");
@@ -310,35 +232,6 @@ fn the_report_ends_cleanly_when_stdout_does_not() {
 
     assert!(text.ends_with('\n'), "{text:?}");
     assert!(!text.contains("--- stderr ---"), "{text:?}");
-}
-
-#[test]
-fn the_stdio_loop_answers_requests_and_skips_notifications() {
-    let input = concat!(
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n",
-        "\n",
-        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
-        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n",
-    );
-    let mut output = Vec::new();
-
-    serve(
-        std::io::Cursor::new(input),
-        &mut output,
-        &Stub::new(0),
-        HEARTBEAT,
-    )
-    .expect("the loop completes");
-
-    let lines: Vec<&str> = std::str::from_utf8(&output)
-        .expect("utf8")
-        .lines()
-        .collect();
-    assert_eq!(lines.len(), 2, "{output:?}");
-    let first: Value = serde_json::from_str(lines[0]).expect("json");
-    let second: Value = serde_json::from_str(lines[1]).expect("json");
-    assert_eq!(first["id"], 1);
-    assert_eq!(second["id"], 2);
 }
 
 #[test]

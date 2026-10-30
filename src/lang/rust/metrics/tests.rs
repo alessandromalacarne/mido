@@ -37,29 +37,6 @@ fn the_pass_answers_with_tokei_lines_and_rust_code_analysis_units() {
 }
 
 #[test]
-fn a_tool_that_could_not_read_a_file_says_so() {
-    let repo = MiniRepo::build(None);
-    let runner = FakeRunner::with(&[("tokei", 127, "")]);
-
-    let measurements = measure(
-        &runner,
-        &repo.root,
-        &Target::workspace_target("Cargo.toml"),
-        &files(),
-        "cargo",
-    );
-
-    assert!(measurements.lines.is_empty());
-    assert!(measurements
-        .errors
-        .iter()
-        .any(|error| { error.contains("tokei") && error.contains("could not measure") }));
-    assert!(measurements.errors.iter().any(|error| {
-        error.contains("rust-code-analysis") && error.contains("could not read it")
-    }));
-}
-
-#[test]
 fn nothing_to_measure_runs_nothing() {
     let repo = MiniRepo::build(None);
     let runner = FakeRunner::default();

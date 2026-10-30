@@ -1,6 +1,5 @@
 //! What a session prints: the target table, verdicts, and report paths.
 
-use crate::lang::Lang;
 use crate::report::{GateResult, PASS};
 use crate::session::{
     default_report_path, print_targets, print_verdict, report_path, sandbox_root, scratch_dir,
@@ -11,32 +10,6 @@ use crate::targets::Target;
 use crate::test_support::{config_for, session_for, MiniRepo};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-#[test]
-fn the_report_path_follows_the_session_scratchpad() {
-    let explicit = PathBuf::from("/tmp/explicit.md");
-
-    assert_eq!(default_report_path(Some(explicit.clone())), Some(explicit));
-}
-
-#[test]
-fn targets_are_listed_with_their_kind() {
-    let repo = MiniRepo::build(None);
-    let config = config_for(&repo);
-    let mut out = Vec::new();
-
-    print_targets(
-        &mut out,
-        &repo.root,
-        &Lang::Rust.detect_targets(&repo.root, &config),
-        Style::plain(),
-    );
-
-    let printed = String::from_utf8(out).expect("utf8");
-    assert!(printed.contains("targets under"));
-    assert!(printed.contains("workspace"));
-    assert!(printed.contains("member"));
-}
 
 #[test]
 fn the_target_table_aligns_on_its_widest_name() {

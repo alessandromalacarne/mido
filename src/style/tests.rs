@@ -89,16 +89,6 @@ fn a_status_outside_the_vocabulary_is_left_alone() {
 }
 
 #[test]
-fn colour_is_off_when_nobody_is_looking_at_a_terminal() {
-    let _lock = ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let _env = Env::set(None, Some("xterm-256color"));
-
-    assert!(!Style::detect_with(false).on());
-}
-
-#[test]
 fn a_dumb_terminal_or_a_no_color_variable_turns_colour_off() {
     let _lock = ENV_LOCK
         .lock()

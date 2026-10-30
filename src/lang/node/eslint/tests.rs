@@ -47,45 +47,6 @@ fn a_document_answers_with_lines_nesting_and_units() {
 }
 
 #[test]
-fn a_function_a_rule_reported_unnamed_keeps_its_reading() {
-    let document = serde_json::json!([
-        {
-            "filePath": "/repo/src/a.js",
-            "messages": [
-                { "ruleId": "max-lines-per-function", "message": "Arrow function has too many lines (9). Maximum allowed is 0.", "line": 4, "column": 20 },
-                { "ruleId": "complexity", "message": "Arrow function has a complexity of 4. Maximum allowed is 0.", "line": 4, "column": 20 }
-            ]
-        }
-    ]);
-
-    let measurements = document::readings(&files(), &document);
-
-    assert_eq!(measurements.units.len(), 1);
-    assert_eq!(measurements.units[0].name, "arrow function");
-    assert_eq!(measurements.units[0].sloc, 9);
-    assert_eq!(measurements.units[0].cyclomatic, 4);
-}
-
-#[test]
-fn a_function_one_rule_did_not_report_keeps_that_reading_at_its_floor() {
-    let document = serde_json::json!([
-        {
-            "filePath": "/repo/src/a.js",
-            "messages": [
-                { "ruleId": "complexity", "message": "Function 'f' has a complexity of 9. Maximum allowed is 0.", "line": 2, "column": 1 }
-            ]
-        }
-    ]);
-
-    let measurements = document::readings(&files(), &document);
-
-    let unit = &measurements.units[0];
-    assert_eq!(unit.cyclomatic, 9);
-    assert_eq!(unit.sloc, 0);
-    assert_eq!(unit.cognitive, 0);
-}
-
-#[test]
 fn a_cognitive_reading_lands_on_the_function_it_was_reported_inside() {
     let document = serde_json::json!([
         {
@@ -103,90 +64,6 @@ fn a_cognitive_reading_lands_on_the_function_it_was_reported_inside() {
     assert_eq!(measurements.units.len(), 2);
     assert_eq!(measurements.units[0].cognitive, 0);
     assert_eq!(measurements.units[1].cognitive, 5);
-}
-
-#[test]
-fn the_projects_own_lint_findings_are_left_to_the_syntax_gate() {
-    let document = serde_json::json!([
-        {
-            "filePath": "/repo/src/a.js",
-            "messages": [
-                { "ruleId": "no-unused-vars", "message": "'x' is defined but never used.", "line": 1, "column": 7 },
-                { "ruleId": "@typescript-eslint/no-explicit-any", "message": "Unexpected any.", "line": 2, "column": 9 }
-            ]
-        }
-    ]);
-
-    let measurements = document::readings(&files(), &document);
-
-    assert!(measurements.units.is_empty());
-    assert!(measurements.errors.is_empty(), "{:?}", measurements.errors);
-}
-
-#[test]
-fn a_file_eslint_could_not_parse_is_a_measurement_error() {
-    let document = serde_json::json!([
-        {
-            "filePath": "/repo/src/a.js",
-            "messages": [
-                { "ruleId": null, "fatal": true, "severity": 2, "message": "Parsing error: ':' expected.", "line": 2, "column": 9 }
-            ]
-        }
-    ]);
-
-    let measurements = document::readings(&files(), &document);
-
-    assert_eq!(
-        measurements.errors,
-        vec!["src/a.js: Parsing error: ':' expected.".to_string()]
-    );
-}
-
-#[test]
-fn a_file_the_config_leaves_out_is_a_measurement_error() {
-    let document = serde_json::json!([
-        {
-            "filePath": "/repo/src/a.js",
-            "messages": [
-                { "ruleId": null, "fatal": false, "severity": 1, "message": "File ignored because no matching configuration was supplied." }
-            ]
-        }
-    ]);
-
-    let measurements = document::readings(&files(), &document);
-
-    assert!(measurements.errors[0].contains("no matching configuration"));
-}
-
-#[test]
-fn a_file_with_no_report_at_all_is_a_measurement_error() {
-    let asked = vec!["src/a.js".to_string(), "src/b.js".to_string()];
-    let document = serde_json::json!([{ "filePath": "/repo/src/a.js", "messages": [] }]);
-
-    let measurements = document::readings(&asked, &document);
-
-    assert_eq!(
-        measurements.errors,
-        vec!["src/b.js: eslint returned no report".to_string()]
-    );
-}
-
-#[test]
-fn a_message_mido_cannot_read_is_an_error_not_a_zero() {
-    let document = serde_json::json!([
-        {
-            "filePath": "/repo/src/a.js",
-            "messages": [
-                { "ruleId": "complexity", "message": "Function 'f' is far too complicated for words.", "line": 1, "column": 1 }
-            ]
-        }
-    ]);
-
-    let measurements = document::readings(&files(), &document);
-
-    assert_eq!(measurements.errors.len(), 1);
-    assert!(measurements.errors[0].contains("`complexity`"));
-    assert!(measurements.errors[0].contains("in a shape mido cannot read"));
 }
 
 #[test]

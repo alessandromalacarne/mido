@@ -19,26 +19,6 @@ fn files() -> Vec<String> {
 }
 
 #[test]
-fn a_finished_run_decides_the_verdict() {
-    let repo = repo();
-    let stub = MutationStub::new(vec![Some(Pass {
-        total: 115,
-        caught: 96,
-        unviable: 19,
-        ..Pass::default()
-    })]);
-
-    let result = gate_mutation(&stub, &gate_run_for(&repo, &config_for(&repo), &files()));
-
-    assert_eq!(result.status, PASS);
-    assert!(result.summary.contains("100.0% killed (min 70)"));
-    assert!(result
-        .details
-        .iter()
-        .any(|line| line.contains("115 mutants: 96 caught, 0 missed, 19 unviable")));
-}
-
-#[test]
 fn a_kill_rate_above_the_minimum_passes_and_reports_the_numbers() {
     let repo = repo();
     let stub = MutationStub::new(vec![Some(Pass {

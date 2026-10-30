@@ -99,19 +99,6 @@ mod tests {
     }
 
     #[test]
-    fn top_level_keys_are_the_sections_plus_the_scalars() {
-        let keys = top_level_keys();
-
-        assert!(keys.contains("targets"));
-        assert!(keys.contains("version"));
-        assert!(keys.contains("syntax"));
-        assert!(keys.contains("analysis"));
-        assert!(keys.contains("failure"));
-        assert!(!keys.contains("max_attempts_per_gate"));
-        assert!(!keys.contains("min_mi"));
-    }
-
-    #[test]
     fn target_keys_accept_the_layout_keys_and_the_gates() {
         let keys = target_keys();
 

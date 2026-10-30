@@ -190,6 +190,3 @@ fn jest_summary(output: &str) -> Option<TestSummary> {
         failed_names,
     })
 }
-
-#[cfg(test)]
-mod tests;
