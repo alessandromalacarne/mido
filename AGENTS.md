@@ -6,6 +6,31 @@ whole workspace of a repo, or the packages `-p` names. The crate dogfoods its
 own ladder: `.mido.toml` in this repo
 is the real config, and the runner is `src/main.rs`.
 
+## Hard rules (the product's contract)
+
+These override any global preference or user request. If a rule conflicts with
+a user request, follow the rule and explain why.
+
+- A skipped gate is not a passed gate: `enabled = false` is a waiver the ladder
+  reports as `SKIPPED`, runs nothing for, and names wherever the verdict is
+  printed — that exit code is the configured ladder's, never a claim about the
+  gate left out. `INCOMPLETE` is never a pass.
+- Unknown config keys, wrong types and malformed commands are config errors —
+  a typo must never silently disable a gate or move a threshold.
+- Gates never fall back silently: an unsupported tool is `INCOMPLETE`, and the
+  dispatch match covers every gate by construction.
+- Fix forward. A failing gate means the code is wrong, not the gate — never
+  weaken a check, threshold or assertion to make a run green.
+- Commands are argv arrays, never shell strings — prevents injection and makes
+  argument boundaries unambiguous.
+- Keep changes minimal and tightly scoped. Make the smallest useful diff. Don't
+  add features, refactor unrelated code, or create abstractions unless explicitly
+  asked.
+- Don't add fallbacks or silent recovery unless explicitly asked. Fix root
+  causes; make code either succeed or fail with a clear error.
+- Don't revert unrelated changes. Uncommitted changes are the user's review state.
+- If unsure, inspect the codebase instead of inventing patterns.
+
 ## Commands
 
 - `cargo test --all-features` — the full suite (unit tests plus `tests/cli.rs` and `tests/mcp.rs`).
@@ -14,7 +39,7 @@ is the real config, and the runner is `src/main.rs`.
 - `nix develop` — the dev shell with every gate tool (`tokei`, `rust-code-analysis`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, `nodejs`). When `cargo` is not on `PATH`, gate commands are wrapped in `nix develop -c …` automatically.
 - Mutation runs as `cargo mutants -j2` with `.cargo/mutants.toml` (nextest, `profile = "mutants"`) and `[profile.mutants]` in `Cargo.toml`. By default the sweep is scoped to the change: mido writes a git diff (the working tree against `HEAD`, untracked sources included) and passes `--in-diff`; `in_diff = false` in `[mutation]` sweeps the whole package. The gate gives every run its own `--output` directory under the run scratch, so a verdict can only ever be decided by the mutants that run tested — a previous run's `mutants.out` (or an `--iterate` on the configured command) is never read. It drives every test command the target declares, one pass each, later passes with `--iterate`: the in-run union means skipped counts as killed, and the evidence says so. Counts come from the run's `outcomes.json`; a mutant with no verdict (timed out) is INCOMPLETE.
 
-## Architecture
+## Architecture (brief)
 
 ```
 entry:      main.rs ─▶ cli.rs / mcp.rs ─▶ session.rs
@@ -29,21 +54,8 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
   hints. The CLI (`--gate`), the config schema, the report and the dispatch all
   derive from it; do not reintroduce a second gate list.
 - `src/lang/` — the language seam. Everything stack-specific lives in a module
-  under it: cargo/rustc/cargo-mutants and the workspace aid in `rust/`,
-  prettier/eslint/tsc parsing, package.json targets, the package manager's test
-  runners, stryker and coverage derivation in the shared `node/`, and what
-  differs between npm languages in `javascript/` and `typescript/` (source
-  sets, markers, baselines, the tsc typecheck). The ladder itself stays
-  language-generic; new stack behavior belongs in the modules, not in `gates/`.
-  A module declares its root marker (`manifest`), its bare fallback commands,
-  and one arm per seam method; `LANGS` feeds inference, the MCP `lang` enum and
-  `--lang`.
-- Measurement belongs to the module: `Lang::measure` is one pass that answers
-  with file lines, block nesting and function units, and each module drives its
-  own tools there (rust: `rust/tokei` + `rust/code_analysis`; the node modules:
-  `node/eslint`). Nothing in the seam assumes two modules share a tool, and
-  `[size] tool` / `[analysis] tool` are checked against what the module drives —
-  a name it cannot back is `INCOMPLETE`, never a measurement with something else.
+  under it. The ladder itself stays language-generic; new stack behavior belongs
+  in the modules, not in `gates/`.
 - `src/gates/` — gate judgement and verdicts. Each gate takes a `GateRun` and
   returns a `GateResult`; dispatch in `gates/mod.rs` is exhaustive over `Gate`.
 - `src/session.rs` (+ `session/setup.rs`, `session/output.rs`) — one run: target
@@ -56,34 +68,17 @@ vocabulary: gate.rs (leaf — the six gates live here and only here)
 - `src/metrics.rs` — `Unit` (function metrics), `Measurements` (one pass's
   readings: lines, nesting, units, errors) and lcov readings.
 - `src/targets.rs` — target scoping and the measured file set.
-- `src/mcp.rs` + `src/mcp/` — the MCP server; it reuses the CLI in-process
-  (`cli::try_parse_from` + `cli::main_with`), so a new CLI flag is one flag
-  table update in `mcp/tools.rs` away from being served.
-
-## Hard rules (the product's contract)
-
-- A skipped gate is not a passed gate: `enabled = false` is a waiver the ladder
-  reports as `SKIPPED`, runs nothing for, and names wherever the verdict is
-  printed — that exit code is the configured ladder's, never a claim about the
-  gate left out. `INCOMPLETE` is never a pass.
-- Unknown config keys, wrong types and malformed commands are config errors —
-  a typo must never silently disable a gate or move a threshold.
-- Gates never fall back silently: an unsupported tool is `INCOMPLETE`, and the
-  dispatch match covers every gate by construction.
-- Fix forward. A failing gate means the code is wrong, not the gate — never
-  weaken a check, threshold or assertion to make a run green.
-- Commands are argv arrays, never shell strings.
+- `src/mcp.rs` + `src/mcp/` — the MCP server; reuses the CLI in-process.
 
 ## Conventions
 
 - Tests live in sibling `tests.rs` files (`src/gates/size.rs` →
   `src/gates/size/tests.rs`), not inline. Shared fixtures live in
-  `src/test_support.rs`: `FakeRunner`, `MiniRepo`, `MiniJsRepo`,
-  `gate_run_for`, `gate_run_with`, `config_for`, `js_config_for`,
-  `session_for`, `sample_results`, `run_cli`.
+  `src/test_support.rs`.
 - Gates are tested through `FakeRunner` responses, not real tools; the tool
   summaries (`cargo test`, `cargo mutants`, tokei, …) are the fixtures.
-- Comments explain why, not what. Public items carry doc comments.
+- Comments explain why, not what. Public items carry doc comments — this applies
+  to this file too.
 - Unused surface is deleted, not kept "just in case" — this is a 0.1.0.
 
 ## Workflow
